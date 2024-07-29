@@ -1,0 +1,15 @@
+{
+  "name": "@autochek-africa/cron-manager",
+  "version": "0.0.1",
+  "main": "dist/index.js",
+  "types": "dist/types.d.ts",
+  "repository": "git@github.com:Autochek-Africa/autochek-cron.git",
+  "author": "Omowole Gbenga <omowole.gbenga@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
