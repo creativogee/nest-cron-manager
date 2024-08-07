@@ -1,22 +1,22 @@
-# @autochek-africa/cron-manager
+# @leravise/cron-manager
 
 ## Overview
 
-`@autochek-africa/cron-manager` is a TypeScript-based library designed to manage and execute cron jobs efficiently. It provides a robust interface for scheduling, executing, and logging cron jobs with support for Redis-based locking mechanisms to ensure job execution integrity. This documentation includes examples using the NestJS framework.
+`@leravise/cron-manager` is a TypeScript-based library designed to manage and execute cron jobs efficiently. It provides a robust interface for scheduling, executing, and logging cron jobs with support for Redis-based locking mechanisms to ensure job execution integrity. This documentation includes examples using the NestJS framework.
 
 ## Installation
 
 To install the package, use npm:
 
 ```sh
-npm install @autochek-africa/cron-manager
+npm install @leravise/cron-manager
 ```
 
 ## Usage
 
 ### Prerequisites
 
-Before using the `@autochek-africa/cron-manager` library, ensure the following requirements are met:
+Before using the `@leravise/cron-manager` library, ensure the following requirements are met:
 
 - Install `ioredis`, `typeorm` and `@nestjs/config` packages:
 
@@ -29,7 +29,7 @@ Before using the `@autochek-africa/cron-manager` library, ensure the following r
   ```typescript
   // src/cron-config/cron-config.model.ts
 
-  import { CronConfig as CronConfigInterface } from '@autochek-africa/cron-manager/types';
+  import { CronConfig as CronConfigInterface } from '@leravise/cron-manager/types';
   import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
   import { CronJob } from './cron-job.model';
 
@@ -60,7 +60,7 @@ Before using the `@autochek-africa/cron-manager` library, ensure the following r
 
   import { Column, Entity, Index, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
   import { CronConfig } from './cron-config.model';
-  import { CronJob as CronJobInterface } from '@autochek-africa/cron-manager/types';
+  import { CronJob as CronJobInterface } from '@leravise/cron-manager/types';
 
   @Entity({ name: 'cron_jobs' })
   export class CronJob implements CronJobInterface {
@@ -122,7 +122,7 @@ Before using the `@autochek-africa/cron-manager` library, ensure the following r
   ```typescript
   // src/cron-config/cron-config.controller.ts
 
-  import { CronManager } from '@autochek-africa/cron-manager';
+  import { CronManager } from '@leravise/cron-manager';
   import { Controller } from '@nestjs/common';
   import { GrpcMethod } from '@nestjs/microservices';
   import {
@@ -176,7 +176,7 @@ Create an instance of CronManager by passing the required dependencies specified
 ```typescript
 // src/cron-config/cron-config.module.ts
 
-import { CronManager } from '@autochek-africa/cron-manager';
+import { CronManager } from '@leravise/cron-manager';
 import { CacheService } from '@/cache/cache.service';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -253,7 +253,7 @@ Asides from the `distributed` and `ttl` fields which are used internally, you ca
 NB: The context field must be a valid JSON string.
 
 ```typescript
-import { CronManager } from '@autochek-africa/cron-manager';
+import { CronManager } from '@leravise/cron-manager';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
@@ -286,7 +286,7 @@ export class SomeService {
             total: 5,
           });
 
-          // Return events. 
+          // Return events.
           return events;
         } catch (error) {
           // Handle error

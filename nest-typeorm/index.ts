@@ -1,18 +1,23 @@
+import { OnModuleInit } from '@nestjs/common';
+import { CronJob } from 'cron';
 import {
   CreateCronConfig,
+  CronConfig,
   CronManagerDeps,
   CronManager as CronManagerInterface,
   EndJob,
-  JobContext,
+  JobCallback,
   UpdateCronConfig,
-} from './types';
+} from '../types';
 
-export class CronManager implements CronManagerInterface {
+export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
   private configService: any;
   private cronConfigRepository: any;
   private cronJobRepository: any;
   private redisService: any;
+  private cronJobService: any;
+  private cronJobs: Map<string, CronJob> = new Map();
 
   constructor({
     logger,
@@ -20,12 +25,24 @@ export class CronManager implements CronManagerInterface {
     cronConfigRepository,
     cronJobRepository,
     redisService,
+    cronJobService,
   }: CronManagerDeps) {
     this.logger = logger;
     this.configService = configService;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.redisService = redisService;
+    this.cronJobService = cronJobService;
+  }
+
+  onModuleInit() {
+    const config = this.configService.get('app');
+
+    if (!config.cronManager) {
+      return;
+    }
+
+    this.initializeJobs();
   }
 
   checkInit() {
@@ -40,6 +57,10 @@ export class CronManager implements CronManagerInterface {
 
   async createCronConfig(data: CreateCronConfig) {
     const cronConfig = await this.cronConfigRepository.save(data);
+
+    if (cronConfig.cronExpression) {
+      this.resetJobs();
+    }
 
     return { cronConfig };
   }
@@ -57,48 +78,20 @@ export class CronManager implements CronManagerInterface {
 
     const cronConfig = await this.cronConfigRepository.save(found);
 
+    if (cronConfig.cronExpression) {
+      this.resetJobs();
+    }
+
     return { cronConfig };
   }
 
-  private async startJob(name: string) {
+  async handleJob(name: string, callback: JobCallback) {
     const config = this.configService.get('app');
 
     if (!config.cronManager) {
       return;
     }
 
-    const cronConfig = await this.cronConfigRepository.findOne({
-      where: { name },
-    });
-
-    if (!cronConfig?.enabled || cronConfig?.deletedAt) {
-      this.logger.log(`Job: ${name} not found or disabled`);
-      return;
-    }
-
-    const cronJob = this.cronJobRepository.create({
-      config: cronConfig,
-      startedAt: new Date(),
-    });
-
-    const context = JSON.parse(cronConfig?.context || '{}');
-
-    return { job: cronJob, context };
-  }
-
-  private async endJob({ job, status, result }: EndJob) {
-    job.completedAt = status === 'Success' ? new Date() : null;
-    job.failedAt = status === 'Failed' ? new Date() : null;
-    job.result = typeof result === 'object' ? JSON.stringify(result) : result;
-
-    await this.cronJobRepository.save(job);
-  }
-
-  async handleJob(
-    name: string,
-    callback: (context: JobContext, config: Record<string, any>) => Promise<any>,
-  ) {
-    const config = this.configService.get('app');
     let status: EndJob['status'];
     let result: string;
 
@@ -167,5 +160,72 @@ export class CronManager implements CronManagerInterface {
         this.logger.log(endMessage);
       }
     }
+  }
+
+  private async initializeJobs() {
+    const cronConfigs = await this.cronConfigRepository.find();
+    cronConfigs.forEach((cronConfig: CronConfig) => this.scheduleJob(cronConfig));
+  }
+
+  private async scheduleJob(cronConfig: CronConfig) {
+    if (!cronConfig.enabled || cronConfig.deletedAt || !cronConfig.cronExpression) {
+      return;
+    }
+
+    const job = new CronJob(cronConfig.cronExpression, () => {
+      this.executeJob(cronConfig);
+    });
+    job.start();
+    this.cronJobs.set(cronConfig.name, job);
+  }
+
+  private async executeJob(cronConfig: CronConfig) {
+    const callback: JobCallback = await this.cronJobService?.[cronConfig.name];
+
+    if (!callback) {
+      this.logger.error(`Job: ${cronConfig.name} not found`);
+      return;
+    }
+
+    await this.handleJob(cronConfig.name, callback);
+  }
+
+  private async resetJobs() {
+    const cronConfigs = await this.cronConfigRepository.find();
+
+    this.cronJobs.forEach((job, name) => {
+      job.stop();
+      this.cronJobs.delete(name);
+    });
+
+    cronConfigs.forEach((cronConfig: CronConfig) => this.scheduleJob(cronConfig));
+  }
+
+  private async startJob(name: string) {
+    const cronConfig = await this.cronConfigRepository.findOne({
+      where: { name },
+    });
+
+    if (!cronConfig?.enabled || cronConfig?.deletedAt) {
+      this.logger.log(`Job: ${name} not found or disabled`);
+      return;
+    }
+
+    const cronJob = this.cronJobRepository.create({
+      config: cronConfig,
+      startedAt: new Date(),
+    });
+
+    const context = JSON.parse(cronConfig?.context || '{}');
+
+    return { job: cronJob, context };
+  }
+
+  private async endJob({ job, status, result }: EndJob) {
+    job.completedAt = status === 'Success' ? new Date() : null;
+    job.failedAt = status === 'Failed' ? new Date() : null;
+    job.result = typeof result === 'object' ? JSON.stringify(result) : result;
+
+    await this.cronJobRepository.save(job);
   }
 }

@@ -22,10 +22,13 @@ export class CronManager {
   ): Promise<void>;
 }
 
+export type JobCallback = (context: JobContext, config: Record<string, any>) => Promise<any>;
+
 export interface CronConfig {
   id: number;
   name: string;
   context?: any;
+  cronExpression?: string;
   enabled: boolean;
   deletedAt?: Date;
   jobs: CronJob[];
@@ -46,11 +49,13 @@ export interface CronManagerDeps {
   cronConfigRepository: any;
   cronJobRepository: any;
   redisService: any;
+  cronJobService?: any;
 }
 
 export interface CreateCronConfig {
   name: string;
   context?: any;
+  cronExpression?: string;
   enabled: boolean;
 }
 
@@ -58,6 +63,7 @@ export interface UpdateCronConfig {
   id: number;
   name?: string;
   context?: any;
+  cronExpression?: string;
   enabled?: boolean;
 }
 
