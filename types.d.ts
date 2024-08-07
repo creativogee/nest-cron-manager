@@ -22,14 +22,16 @@ export class CronManager {
   ): Promise<void>;
 }
 
-export type JobCallback = (context: JobContext, config: Record<string, any>) => Promise<any>;
+export type JobExecution = (context?: JobContext, config?: Record<string, any>) => Promise<any>;
 
 export interface CronConfig {
   id: number;
   name: string;
+  jobType: 'callback' | 'method' | 'query';
+  enabled: boolean;
   context?: any;
   cronExpression?: string;
-  enabled: boolean;
+  query?: string;
   deletedAt?: Date;
   jobs: CronJob[];
 }
@@ -56,6 +58,7 @@ export interface CreateCronConfig {
   name: string;
   context?: any;
   cronExpression?: string;
+  jobType?: 'callback' | 'method' | 'query';
   enabled: boolean;
 }
 
@@ -64,6 +67,7 @@ export interface UpdateCronConfig {
   name?: string;
   context?: any;
   cronExpression?: string;
+  jobType?: 'callback' | 'method' | 'query';
   enabled?: boolean;
 }
 

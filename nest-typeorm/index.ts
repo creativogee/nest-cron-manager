@@ -6,7 +6,7 @@ import {
   CronManagerDeps,
   CronManager as CronManagerInterface,
   EndJob,
-  JobCallback,
+  JobExecution,
   UpdateCronConfig,
 } from '../types';
 
@@ -56,9 +56,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async createCronConfig(data: CreateCronConfig) {
-    const cronConfig = await this.cronConfigRepository.save(data);
+    const cronConfig: CronConfig = await this.cronConfigRepository.save(data);
 
-    if (cronConfig.cronExpression) {
+    if (['method', 'query'].includes(data.jobType)) {
       this.resetJobs();
     }
 
@@ -76,16 +76,16 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     Object.assign(found, data);
 
-    const cronConfig = await this.cronConfigRepository.save(found);
+    const cronConfig: CronConfig = await this.cronConfigRepository.save(found);
 
-    if (cronConfig.cronExpression) {
+    if (['method', 'query'].includes(data.jobType)) {
       this.resetJobs();
     }
 
     return { cronConfig };
   }
 
-  async handleJob(name: string, callback: JobCallback) {
+  async handleJob(name: string, execution: JobExecution) {
     const config = this.configService.get('app');
 
     if (!config.cronManager) {
@@ -131,7 +131,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       this.logger.log(startMessage);
 
       try {
-        result = await callback(context, config);
+        result = await execution(context, config);
         status = 'Success';
       } catch (error) {
         result = error;
@@ -168,7 +168,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async scheduleJob(cronConfig: CronConfig) {
-    if (!cronConfig.enabled || cronConfig.deletedAt || !cronConfig.cronExpression) {
+    if (!cronConfig.enabled || cronConfig.deletedAt || cronConfig.jobType === 'callback') {
       return;
     }
 
@@ -180,14 +180,22 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async executeJob(cronConfig: CronConfig) {
-    const callback: JobCallback = await this.cronJobService?.[cronConfig.name];
+    let execution: JobExecution;
 
-    if (!callback) {
-      this.logger.error(`Job: ${cronConfig.name} not found`);
+    if (cronConfig.jobType === 'method') {
+      execution = this.cronJobService?.[cronConfig.name];
+    }
+
+    if (cronConfig.jobType === 'query' && cronConfig.query) {
+      execution = async () => this.cronJobRepository.query(`${cronConfig.query}`);
+    }
+
+    if (!execution) {
+      this.logger.error(`Job: Execution function not defined for ${cronConfig.name}`);
       return;
     }
 
-    await this.handleJob(cronConfig.name, callback);
+    await this.handleJob(cronConfig.name, execution);
   }
 
   private async resetJobs() {
