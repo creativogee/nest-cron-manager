@@ -10,10 +10,15 @@ import {
   DatabaseOps,
   EndJob,
   JobExecution,
-  JobType,
   UpdateCronConfig,
 } from '../types';
 import { validateDeps } from './helper';
+
+export enum JobType {
+  INLINE = 'inline',
+  METHOD = 'method',
+  QUERY = 'query',
+}
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
