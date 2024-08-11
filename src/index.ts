@@ -10,6 +10,7 @@ import {
   DatabaseOps,
   EndJob,
   JobExecution,
+  JobType,
   UpdateCronConfig,
 } from '../types';
 import { validateDeps } from './helper';
@@ -76,13 +77,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async createCronConfig(data: CreateCronConfig) {
-    if (data.jobType === 'query' && data.query) {
+    if (data.jobType === JobType.QUERY && data.query) {
       data.query = this.encryptQuery(data.query);
     }
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
-    if (['method', 'query'].includes(data.jobType)) {
+    if ([JobType.METHOD, JobType.QUERY].includes(data.jobType as JobType)) {
       this.resetJobs();
     }
 
@@ -206,7 +207,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async scheduleJob(cronConfig: CronConfig) {
-    if (!cronConfig.enabled || cronConfig.deletedAt || cronConfig.jobType === 'inline') {
+    if (!cronConfig.enabled || cronConfig.deletedAt || cronConfig.jobType === JobType.INLINE) {
       return;
     }
 
@@ -220,11 +221,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private async executeJob(cronConfig: CronConfig) {
     let execution: JobExecution;
 
-    if (cronConfig.jobType === 'method') {
+    if (cronConfig.jobType === JobType.METHOD) {
       execution = this.cronJobService?.[cronConfig.name];
     }
 
-    if (cronConfig.jobType === 'query' && cronConfig.query) {
+    if (cronConfig.jobType === JobType.QUERY && cronConfig.query) {
       const query = this.decryptQuery(cronConfig.query);
 
       execution = async () => this.databaseOps.query(`${query}`);

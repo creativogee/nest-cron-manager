@@ -11,13 +11,18 @@ export class CronManager {
   checkInit(): boolean;
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
+  /**
+   * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
+   * @param execution - The function to be executed
+   * @warning Failure to match these names WILL result in unexpected behavior
+   */
   handleJob(
     name: string,
     execution: (context: {}, config: Record<string, any>) => Promise<any>,
   ): Promise<void>;
 }
 
-export enum jobType {
+export enum JobType {
   INLINE = 'inline',
   METHOD = 'method',
   QUERY = 'query',
