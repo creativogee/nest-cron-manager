@@ -27,7 +27,7 @@ export type JobExecution = (context?: JobContext, config?: Record<string, any>) 
 export interface CronConfig {
   id: number;
   name: string;
-  jobType: 'callback' | 'method' | 'query';
+  jobType: string; // 'callback' | 'method' | 'query';
   enabled: boolean;
   context?: any;
   cronExpression?: string;
@@ -60,7 +60,7 @@ export interface CreateCronConfig {
   name: string;
   context?: any;
   cronExpression?: string;
-  jobType?: 'callback' | 'method' | 'query';
+  jobType?: string; // 'callback' | 'method' | 'query';
   query?: string;
   dryRun?: boolean;
   enabled: boolean;
@@ -71,7 +71,7 @@ export interface UpdateCronConfig {
   name?: string;
   context?: any;
   cronExpression?: string;
-  jobType?: 'callback' | 'method' | 'query';
+  jobType?: string; // 'callback' | 'method' | 'query';
   query?: string;
   dryRun?: boolean;
   enabled?: boolean;
