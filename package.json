@@ -1,16 +1,22 @@
 {
   "name": "nest-cron-manager",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "main": "dist/index.js",
-  "types": "dist/types.d.ts",
-  "author": "Omowole Gbenga <omowole.gbenga@gmail.com>",
+  "files": [
+    "dist",
+    "types"
+  ],
+  "author": "Gbenga Omowole <omowole.gbenga@gmail.com>",
   "license": "MIT",
   "scripts": {
-    "build": "tsc"
+    "build": "npm run clean && tsc",
+    "prepublishOnly": "npm run build",
+    "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@nestjs/common": "^10.3.10",
     "@types/crypto-js": "^4.2.2",
+    "@types/node": "^22.2.0",
     "typescript": "^5.5.4"
   },
   "dependencies": {

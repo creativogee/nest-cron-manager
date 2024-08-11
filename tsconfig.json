@@ -1,17 +1,19 @@
 {
   "compilerOptions": {
     "module": "commonjs",
+    "target": "ESNext",
     "declaration": true,
     "removeComments": true,
     "esModuleInterop": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "target": "ESNext",
+    "declarationDir": "./dist/types",
     "sourceMap": true,
     "baseUrl": "./",
     "outDir": "./dist",
-    "incremental": true
+    "incremental": true,
+    "types": ["node"]
   },
-  "include": ["index.ts"],
+  "include": ["src/**/*", "types"],
   "exclude": ["node_modules", "dist"]
 }

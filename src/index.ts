@@ -1,7 +1,6 @@
 import { OnModuleInit } from '@nestjs/common';
 import { CronJob as Job } from 'cron';
 import crypto from 'crypto-js';
-import { validateRepos } from './helper';
 import {
   CreateCronConfig,
   CronConfig,
@@ -12,7 +11,8 @@ import {
   EndJob,
   JobExecution,
   UpdateCronConfig,
-} from './types';
+} from '../types';
+import { validateRepos } from './helper';
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;

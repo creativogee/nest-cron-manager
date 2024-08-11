@@ -5,7 +5,7 @@ import {
   DatabaseOps,
   MongooseOperationsDeps,
   TypeormOperationsDeps,
-} from './types';
+} from '../types';
 
 export class TypeOrmOperations implements DatabaseOps {
   private cronConfigRepository: any;

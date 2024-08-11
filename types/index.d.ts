@@ -29,18 +29,18 @@ export interface CronConfig {
   name: string;
   jobType: string; // 'callback' | 'method' | 'query';
   enabled: boolean;
-  context?: any;
-  cronExpression?: string;
-  query?: string;
-  dryRun?: boolean;
-  deletedAt?: Date;
+  context: any | null;
+  cronExpression: string | null;
+  query: string | null;
+  dryRun: boolean | null;
+  deletedAt: Date | null;
   jobs: CronJob[];
 }
 
 export interface CronJob {
   id: number;
   config: CronConfig;
-  result?: any;
+  result: any | null;
   startedAt: Date | null;
   completedAt: Date | null;
   failedAt: Date | null;
