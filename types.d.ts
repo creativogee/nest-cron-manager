@@ -32,6 +32,7 @@ export interface CronConfig {
   context?: any;
   cronExpression?: string;
   query?: string;
+  dryRun?: boolean;
   deletedAt?: Date;
   jobs: CronJob[];
 }
@@ -52,6 +53,7 @@ export interface CronManagerDeps {
   cronJobRepository: any;
   redisService: any;
   cronJobService?: any;
+  ormType: 'typeorm' | 'mongoose';
 }
 
 export interface CreateCronConfig {
@@ -80,4 +82,15 @@ export interface EndJob {
 export interface JobContext {
   distributed?: boolean;
   ttl?: number;
+}
+
+interface DatabaseOps {
+  findOneCronConfig(options: any): Promise<CronConfig | null>;
+  findCronConfigs(options?: any): Promise<CronConfig[]>;
+  createCronConfig(data: CreateCronConfig): CronConfig;
+  saveCronConfig(data: CreateCronConfig): Promise<CronConfig>;
+  createCronJob(data: any): CronJob;
+  saveCronJob(data: any): Promise<any>;
+  query(sql: string): Promise<any>;
+  isTypeOrm(): boolean;
 }

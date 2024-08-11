@@ -1,14 +1,17 @@
 import { OnModuleInit } from '@nestjs/common';
-import { CronJob } from 'cron';
+import { CronJob as Job } from 'cron';
+import { validateRepos } from './helper';
 import {
   CreateCronConfig,
   CronConfig,
+  CronJob,
   CronManagerDeps,
   CronManager as CronManagerInterface,
+  DatabaseOps,
   EndJob,
   JobExecution,
   UpdateCronConfig,
-} from '../types';
+} from './types';
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
@@ -17,11 +20,14 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private cronJobRepository: any;
   private redisService: any;
   private cronJobService: any;
-  private cronJobs: Map<string, CronJob> = new Map();
+  private ormType: 'typeorm' | 'mongoose';
+  private databaseOps: DatabaseOps;
+  private cronJobs: Map<string, Job> = new Map();
 
   constructor({
     logger,
     configService,
+    ormType,
     cronConfigRepository,
     cronJobRepository,
     redisService,
@@ -29,6 +35,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }: CronManagerDeps) {
     this.logger = logger;
     this.configService = configService;
+    this.ormType = ormType;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.redisService = redisService;
@@ -42,6 +49,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return;
     }
 
+    this.databaseOps = validateRepos({
+      cronConfigRepository: this.cronConfigRepository,
+      cronJobRepository: this.cronJobRepository,
+      ormType: this.ormType,
+    });
+
     this.initializeJobs();
   }
 
@@ -51,12 +64,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       !!this.configService &&
       !!this.cronConfigRepository &&
       !!this.cronJobRepository &&
-      !!this.redisService
+      !!this.redisService &&
+      !!this.databaseOps &&
+      !!this.cronJobService &&
+      !!this.ormType
     );
   }
 
   async createCronConfig(data: CreateCronConfig) {
-    const cronConfig: CronConfig = await this.cronConfigRepository.save(data);
+    const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
     if (['method', 'query'].includes(data.jobType)) {
       this.resetJobs();
@@ -66,7 +82,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async updateCronConfig(data: UpdateCronConfig) {
-    const found = await this.cronConfigRepository.findOne({
+    const found = await this.databaseOps.findOneCronConfig({
       where: { id: data.id },
     });
 
@@ -76,7 +92,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     Object.assign(found, data);
 
-    const cronConfig: CronConfig = await this.cronConfigRepository.save(found);
+    const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
 
     if (['method', 'query'].includes(data.jobType)) {
       this.resetJobs();
@@ -101,11 +117,14 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     let acquiredLock: string;
 
     try {
-      const start = await this.startJob(name);
+      const startedJob = await this.startJob(name);
 
-      if (!start?.job) return;
+      const { job, context, dryRun } = startedJob || {};
 
-      const { job, context } = start;
+      if (!job && !dryRun) {
+        this.logger.log(`Job: ${name} not found or disabled - Not a dry run`);
+        return;
+      }
 
       let startMessage = `Job: ${name}; Started - Success`;
 
@@ -138,7 +157,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         status = 'Failed';
       }
 
-      await this.endJob({ job, status, result });
+      if (!dryRun && job) {
+        await this.endJob({ job, status, result });
+      }
     } finally {
       if (status) {
         let endMessage = `Job: ${name}; Ended - ${status}`;
@@ -163,7 +184,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async initializeJobs() {
-    const cronConfigs = await this.cronConfigRepository.find();
+    const cronConfigs = await this.databaseOps.findCronConfigs();
     cronConfigs.forEach((cronConfig: CronConfig) => this.scheduleJob(cronConfig));
   }
 
@@ -172,7 +193,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return;
     }
 
-    const job = new CronJob(cronConfig.cronExpression, () => {
+    const job = new Job(cronConfig.cronExpression, () => {
       this.executeJob(cronConfig);
     });
     job.start();
@@ -187,7 +208,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
 
     if (cronConfig.jobType === 'query' && cronConfig.query) {
-      execution = async () => this.cronJobRepository.query(`${cronConfig.query}`);
+      execution = async () => this.databaseOps.query(`${cronConfig.query}`);
     }
 
     if (!execution) {
@@ -199,7 +220,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async resetJobs() {
-    const cronConfigs = await this.cronConfigRepository.find();
+    const cronConfigs = await this.databaseOps.findCronConfigs();
 
     this.cronJobs.forEach((job, name) => {
       job.stop();
@@ -210,7 +231,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async startJob(name: string) {
-    const cronConfig = await this.cronConfigRepository.findOne({
+    const cronConfig = await this.databaseOps.findOneCronConfig({
       where: { name },
     });
 
@@ -219,14 +240,18 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return;
     }
 
-    const cronJob = this.cronJobRepository.create({
-      config: cronConfig,
-      startedAt: new Date(),
-    });
+    let cronJob: CronJob;
+
+    if (!cronConfig.dryRun) {
+      cronJob = this.databaseOps.createCronJob({
+        config: cronConfig,
+        startedAt: new Date(),
+      });
+    }
 
     const context = JSON.parse(cronConfig?.context || '{}');
 
-    return { job: cronJob, context };
+    return { job: cronJob, context, dryRun: cronConfig?.dryRun };
   }
 
   private async endJob({ job, status, result }: EndJob) {
@@ -234,6 +259,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     job.failedAt = status === 'Failed' ? new Date() : null;
     job.result = typeof result === 'object' ? JSON.stringify(result) : result;
 
-    await this.cronJobRepository.save(job);
+    await this.databaseOps.saveCronJob(job);
   }
 }

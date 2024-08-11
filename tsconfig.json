@@ -11,6 +11,6 @@
     "outDir": "./dist",
     "incremental": true
   },
-  "include": ["nest-typeorm/index.ts"],
+  "include": ["index.ts"],
   "exclude": ["node_modules", "dist"]
 }
