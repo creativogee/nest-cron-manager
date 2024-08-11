@@ -5,13 +5,8 @@ export class CronManager {
     cronConfigRepository,
     cronJobRepository,
     redisService,
-  }: {
-    logger: any;
-    configService: any;
-    cronConfigRepository: any;
-    cronJobRepository: any;
-    redisService: any;
-  });
+    ormType,
+  }: CronManagerDeps);
 
   checkInit(): boolean;
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
