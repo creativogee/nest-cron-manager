@@ -29,7 +29,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
   ```typescript
   // src/cron-config/cron-config.model.ts
 
-  import { JobType } from 'nest-cron-manager';
+  import { CronManager } from 'nest-cron-manager';
   import {
     CronConfig as CronConfigInterface,
     CronJob as CronJobInterface,
@@ -45,8 +45,8 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
     @Column({ unique: true })
     name: string;
 
-    @Column({ nullable: true, default: JobType.INLINE })
-    jobType?: JobType; // inline, method, query
+    @Column({ nullable: true, default: CronManager.JobType.INLINE })
+    jobType?: string;
 
     @Column({ default: false })
     enabled: boolean;

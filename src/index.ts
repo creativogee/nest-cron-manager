@@ -14,12 +14,6 @@ import {
 } from '../types';
 import { validateDeps } from './helper';
 
-export enum JobType {
-  INLINE = 'inline',
-  METHOD = 'method',
-  QUERY = 'query',
-}
-
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
   private configService: any;
@@ -30,6 +24,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private ormType: 'typeorm' | 'mongoose';
   private databaseOps: DatabaseOps;
   private cronJobs: Map<string, Job> = new Map();
+
+  static readonly JobType = {
+    INLINE: 'inline',
+    METHOD: 'method',
+    QUERY: 'query',
+  };
 
   constructor({
     logger,
@@ -82,13 +82,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async createCronConfig(data: CreateCronConfig) {
-    if (data.jobType === JobType.QUERY && data.query) {
+    if (data.jobType === CronManager.JobType.QUERY && data.query) {
       data.query = this.encryptQuery(data.query);
     }
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
-    if ([JobType.METHOD, JobType.QUERY].includes(data.jobType as JobType)) {
+    if ([CronManager.JobType.METHOD, CronManager.JobType.QUERY].includes(data.jobType)) {
       this.resetJobs();
     }
 
@@ -212,7 +212,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async scheduleJob(cronConfig: CronConfig) {
-    if (!cronConfig.enabled || cronConfig.deletedAt || cronConfig.jobType === JobType.INLINE) {
+    if (
+      !cronConfig.enabled ||
+      cronConfig.deletedAt ||
+      cronConfig.jobType === CronManager.JobType.INLINE
+    ) {
       return;
     }
 
@@ -226,11 +230,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private async executeJob(cronConfig: CronConfig) {
     let execution: JobExecution;
 
-    if (cronConfig.jobType === JobType.METHOD) {
+    if (cronConfig.jobType === CronManager.JobType.METHOD) {
       execution = this.cronJobService?.[cronConfig.name];
     }
 
-    if (cronConfig.jobType === JobType.QUERY && cronConfig.query) {
+    if (cronConfig.jobType === CronManager.JobType.QUERY && cronConfig.query) {
       const query = this.decryptQuery(cronConfig.query);
 
       execution = async () => this.databaseOps.query(`${query}`);
