@@ -102,14 +102,24 @@ export class MongooseOperations implements DatabaseOps {
   }
 }
 
-export const validateRepos = ({
+export const validateDeps = ({
   cronConfigRepository,
   cronJobRepository,
   configService,
   ormType,
-}: Partial<CronManagerDeps>) => {
+  logger,
+  redisService,
+}: CronManagerDeps) => {
   if (['typeorm', 'mongoose'].indexOf(ormType) === -1) {
     throw new Error('Invalid ORM type');
+  }
+
+  if (!logger) {
+    throw new Error('Logger not provided');
+  }
+
+  if (!redisService) {
+    throw new Error('Redis service not provided');
   }
 
   if (!configService) {

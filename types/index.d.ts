@@ -13,7 +13,7 @@ export class CronManager {
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
   handleJob(
     name: string,
-    callback: (context: {}, config: Record<string, any>) => Promise<any>,
+    execution: (context: {}, config: Record<string, any>) => Promise<any>,
   ): Promise<void>;
 }
 
@@ -22,7 +22,7 @@ export type JobExecution = (context?: JobContext, config?: Record<string, any>) 
 export interface CronConfig {
   id: number;
   name: string;
-  jobType: string; // 'callback' | 'method' | 'query';
+  jobType: string; // 'inline' | 'method' | 'query';
   enabled: boolean;
   context: any | null;
   cronExpression: string | null;
@@ -55,7 +55,7 @@ export interface CreateCronConfig {
   name: string;
   context?: any;
   cronExpression?: string;
-  jobType?: string; // 'callback' | 'method' | 'query';
+  jobType?: string; // 'inline' | 'method' | 'query';
   query?: string;
   dryRun?: boolean;
   enabled: boolean;
@@ -66,7 +66,7 @@ export interface UpdateCronConfig {
   name?: string;
   context?: any;
   cronExpression?: string;
-  jobType?: string; // 'callback' | 'method' | 'query';
+  jobType?: string; // 'inline' | 'method' | 'query';
   query?: string;
   dryRun?: boolean;
   enabled?: boolean;

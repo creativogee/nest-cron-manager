@@ -41,8 +41,8 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
     @Column({ unique: true })
     name: string;
 
-    @Column({ nullable: true, default: 'callback' })
-    jobType?: string; // callback, method, query
+    @Column({ nullable: true, default: 'inline' })
+    jobType?: string; // inline, method, query
 
     @Column({ default: false })
     enabled: boolean;
@@ -191,11 +191,12 @@ Create an instance of CronManager by passing the required dependencies specified
 ```typescript
 // src/cron-config/cron-config.module.ts
 
-import { CronManager } from 'nest-cron-manager';
+import { CacheModule } from '@/cache/cache.module';
 import { CacheService } from '@/cache/cache.service';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
+import { CronManager } from 'nest-cron-manager';
 import { Repository } from 'typeorm';
 import { CronConfigController } from './cron-config.controller';
 import { CronConfig } from './cron-config.model';
@@ -203,6 +204,7 @@ import { CronJob } from './cron-job.model';
 
 @Module({
   controllers: [CronConfigController],
+  imports: [TypeOrmModule.forFeature([CronConfig, CronJob]), CacheModule],
   providers: [
     {
       provide: CronManager,
@@ -237,7 +239,7 @@ export class CronConfigModule {}
 
 Depending on the specified jobType when creating your cronConfig, there are three different ways the cronManager may execute the job:
 
-1. `callback`: The cron job will execute a callback function passed to the `handleJob` method of the `CronManager` class.
+1. `inline`: The cron job will execute a inline function passed to the `handleJob` method of the `CronManager` class.
 
    ```sh
    curl -X 'POST' \
@@ -246,7 +248,7 @@ Depending on the specified jobType when creating your cronConfig, there are thre
      -H 'Content-Type: application/json' \
      -d '{
      "name": "doSomething",
-     "jobType": "callback",
+     "jobType": "inline",
      "enabled": true,
      "context": "{
        \"distributed\": true,
@@ -268,7 +270,11 @@ Depending on the specified jobType when creating your cronConfig, there are thre
 
    To execute cron jobs, use the `handleJob` method of the `CronManager` class:
 
-   PS: Although for this jobType you are not required to use the function name as the cron config name, it is generally recommended to do so for consistency as you would see in other jobTypes.
+   NB: While you could call the `handleJob` of the `cronManager` anywhere in your project, it is recommended to define all handlers in the `CronJobService` class. Benefits of this approach:
+
+   - Ensure unique job names across the application.
+   - Easily switch a handler function between the `inline` and `method` job types
+   - Manage all job handlers in one place
 
    Below is an example of how to execute a cron job using the `handleJob` method:
 
@@ -277,13 +283,13 @@ Depending on the specified jobType when creating your cronConfig, there are thre
    import { Cron, CronExpression } from '@nestjs/schedule';
 
    @Injectable()
-   export class SomeService {
+   export class CronJobService {
      constructor(private readonly cronManager: CronManager) {}
 
      @Cron(CronExpression.EVERY_5_MINUTES)
      async doSomething() {
        await this.cronManager.handleJob(
-         'doSomething', // You are required to use the function name as the cron config name
+         'doSomething',
          async (context: Record<string, any>, config: Record<string, any>) => {
            const events = [];
            // Other variables
@@ -326,7 +332,7 @@ Depending on the specified jobType when creating your cronConfig, there are thre
    }
    ```
 
-2. `method`: The cron job will execute a method defined on your `CronJobService` class. The method name must match the cronConfig name and you must provide the cronExpression.
+2. `method`: The cron job will execute a method defined on your `CronJobService` class. The method name MUST match the cronConfig name and you must provide the cronExpression.
 
    ```sh
     curl -X 'POST' \

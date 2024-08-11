@@ -12,7 +12,7 @@ import {
   JobExecution,
   UpdateCronConfig,
 } from '../types';
-import { validateRepos } from './helper';
+import { validateDeps } from './helper';
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
@@ -50,10 +50,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return;
     }
 
-    this.databaseOps = validateRepos({
+    this.databaseOps = validateDeps({
       cronConfigRepository: this.cronConfigRepository,
       cronJobRepository: this.cronJobRepository,
       ormType: this.ormType,
+      configService: this.configService,
+      logger: this.logger,
+      redisService: this.redisService,
     });
 
     this.initializeJobs();
@@ -110,6 +113,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     return { cronConfig };
   }
 
+  /**
+   * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
+   * @param execution - The function to be executed
+   * @warning Failure to match these names WILL result in unexpected behavior
+   */
   async handleJob(name: string, execution: JobExecution) {
     const config = this.configService.get('app');
 
@@ -198,7 +206,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async scheduleJob(cronConfig: CronConfig) {
-    if (!cronConfig.enabled || cronConfig.deletedAt || cronConfig.jobType === 'callback') {
+    if (!cronConfig.enabled || cronConfig.deletedAt || cronConfig.jobType === 'inline') {
       return;
     }
 
