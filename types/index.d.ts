@@ -17,6 +17,12 @@ export class CronManager {
   ): Promise<void>;
 }
 
+export enum jobType {
+  INLINE = 'inline',
+  METHOD = 'method',
+  QUERY = 'query',
+}
+
 export type JobExecution = (context?: JobContext, config?: Record<string, any>) => Promise<any>;
 
 export interface CronConfig {
