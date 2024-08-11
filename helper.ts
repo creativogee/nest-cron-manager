@@ -1,7 +1,22 @@
-import { CreateCronConfig, CronConfig, CronManagerDeps, DatabaseOps } from './types';
+import {
+  CreateCronConfig,
+  CronConfig,
+  CronManagerDeps,
+  DatabaseOps,
+  MongooseOperationsDeps,
+  TypeormOperationsDeps,
+} from './types';
 
 export class TypeOrmOperations implements DatabaseOps {
-  constructor(private cronConfigRepository: any, private cronJobRepository: any) {}
+  private cronConfigRepository: any;
+  private cronJobRepository: any;
+  private configService: any;
+
+  constructor({ cronConfigRepository, cronJobRepository, configService }: TypeormOperationsDeps) {
+    this.cronConfigRepository = cronConfigRepository;
+    this.cronJobRepository = cronJobRepository;
+    this.configService = configService;
+  }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
     return this.cronConfigRepository.findOne(options);
@@ -16,6 +31,13 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async saveCronConfig(data: CronConfig): Promise<CronConfig> {
+    // before saving encrypt the query
+    const querySecret = this.configService.get('app.cronManager.querySecret');
+    if (data.jobType === 'query') {
+      if (!querySecret) {
+        throw new Error('Query secret not found');
+      }
+    }
     return this.cronConfigRepository.save(data);
   }
 
@@ -37,18 +59,26 @@ export class TypeOrmOperations implements DatabaseOps {
 }
 
 export class MongooseOperations implements DatabaseOps {
-  constructor(private CronConfigModel: any, private CronJobModel: any) {}
+  private cronConfigModel: any;
+  private cronJobModel: any;
+  private configService: any;
+
+  constructor({ cronConfigModel, cronJobModel, configService }: MongooseOperationsDeps) {
+    this.cronConfigModel = cronConfigModel;
+    this.cronJobModel = cronJobModel;
+    this.configService = configService;
+  }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
-    return this.CronConfigModel.findOne(options).exec();
+    return this.cronConfigModel.findOne(options).exec();
   }
 
   async findCronConfigs(options?: any): Promise<CronConfig[]> {
-    return this.CronConfigModel.find(options).exec();
+    return this.cronConfigModel.find(options).exec();
   }
 
   createCronConfig(data: CreateCronConfig): CronConfig {
-    return new this.CronConfigModel(data);
+    return new this.cronConfigModel(data);
   }
 
   async saveCronConfig(data: any): Promise<CronConfig> {
@@ -56,7 +86,7 @@ export class MongooseOperations implements DatabaseOps {
   }
 
   createCronJob(data: any): any {
-    return new this.CronJobModel(data);
+    return new this.cronJobModel(data);
   }
 
   async saveCronJob(data: any): Promise<any> {
@@ -75,10 +105,15 @@ export class MongooseOperations implements DatabaseOps {
 export const validateRepos = ({
   cronConfigRepository,
   cronJobRepository,
+  configService,
   ormType,
 }: Partial<CronManagerDeps>) => {
   if (['typeorm', 'mongoose'].indexOf(ormType) === -1) {
     throw new Error('Invalid ORM type');
+  }
+
+  if (!configService) {
+    throw new Error('Config service not provided');
   }
 
   if (!cronConfigRepository || !cronJobRepository) {
@@ -97,7 +132,7 @@ export const validateRepos = ({
       throw new Error('Invalid TypeORM repositories');
     }
 
-    databaseOps = new TypeOrmOperations(cronConfigRepository, cronJobRepository);
+    databaseOps = new TypeOrmOperations({ cronConfigRepository, cronJobRepository, configService });
   }
 
   if (ormType === 'mongoose') {
@@ -105,7 +140,11 @@ export const validateRepos = ({
       throw new Error('Invalid Mongoose repositories');
     }
 
-    databaseOps = new MongooseOperations(cronConfigRepository, cronJobRepository);
+    databaseOps = new MongooseOperations({
+      cronConfigModel: cronConfigRepository,
+      cronJobModel: cronJobRepository,
+      configService,
+    });
   }
 
   if (!databaseOps) {

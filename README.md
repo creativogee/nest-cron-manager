@@ -1,24 +1,24 @@
-# @leravise/cron-manager
+# nest-cron-manager
 
 ## Overview
 
-`@leravise/cron-manager` is a TypeScript-based library designed to manage and execute cron jobs efficiently. It provides a robust interface for scheduling, executing, and logging cron jobs with support for Redis-based locking mechanisms to ensure job execution integrity. This documentation includes examples using the NestJS framework.
+`nest-cron-manager` is a TypeScript-based library designed to manage and execute cron jobs efficiently. It provides a robust interface for scheduling, executing, and logging cron jobs with support for Redis-based locking mechanisms to ensure job execution integrity.
 
 ## Installation
 
 To install the package, use npm:
 
 ```sh
-npm install @leravise/cron-manager
+npm install nest-cron-manager
 ```
 
 ## Usage
 
 ### Prerequisites
 
-Before using the `@leravise/cron-manager` library, ensure the following requirements are met:
+Before using the `nest-cron-manager` library, ensure the following requirements are met:
 
-- Install `ioredis`, `typeorm` and `@nestjs/config` packages:
+- Install `ioredis`,`@nestjs/config` and `typeorm`/`mongoose` packages:
 
   ```sh
   npm install ioredis typeorm @nestjs/config
@@ -29,7 +29,7 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
   ```typescript
   // src/cron-config/cron-config.model.ts
 
-  import { CronConfig as CronConfigInterface } from '@leravise/cron-manager/types';
+  import { CronConfig as CronConfigInterface } from 'nest-cron-manager/types';
   import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
   import { CronJob } from './cron-job.model';
 
@@ -41,11 +41,23 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
     @Column({ unique: true })
     name: string;
 
-    @Column({ nullable: true, type: 'jsonb' })
-    context?: any;
+    @Column({ nullable: true, default: 'callback' })
+    jobType?: string; // callback, method, query
 
     @Column({ default: false })
     enabled: boolean;
+
+    @Column({ nullable: true, type: 'jsonb' })
+    context?: any;
+
+    @Column({ nullable: true })
+    cronExpression?: string;
+
+    @Column({ nullable: true })
+    query?: string;
+
+    @Column({ nullable: true, default: false })
+    dryRun?: boolean;
 
     @Column({ nullable: true })
     deletedAt?: Date;
@@ -60,7 +72,7 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
 
   import { Column, Entity, Index, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
   import { CronConfig } from './cron-config.model';
-  import { CronJob as CronJobInterface } from '@leravise/cron-manager/types';
+  import { CronJob as CronJobInterface } from 'nest-cron-manager/types';
 
   @Entity({ name: 'cron_jobs' })
   export class CronJob implements CronJobInterface {
@@ -85,10 +97,10 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
   }
   ```
 
+- NB: You can implement whatever network and serialization protocol you want to use. For the purpose of this example, we will use gRPC.
 - Create these protobuf service definitions: `CreateCronConfig` and `UpdateCronConfig` in your project. For this example, we will use the inventory service.
 
   ```protobuf
-
   syntax = "proto3";
 
   package cron;
@@ -122,7 +134,7 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
   ```typescript
   // src/cron-config/cron-config.controller.ts
 
-  import { CronManager } from '@leravise/cron-manager';
+  import { CronManager } from 'nest-cron-manager';
   import { Controller } from '@nestjs/common';
   import { GrpcMethod } from '@nestjs/microservices';
   import {
@@ -146,7 +158,7 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
   }
   ```
 
-- Create a `CacheService` in your project and ensure it implements a getClient method.
+- Create a `CacheService` in your project and ensure it implements a `getClient` method.
 
   ```typescript
   import { Injectable } from '@nestjs/common';
@@ -165,7 +177,10 @@ Before using the `@leravise/cron-manager` library, ensure the following requirem
   import { registerAs } from '@nestjs/config';
 
   export default registerAs('config', () => ({
-    cronManager: false,
+    cronManager: {
+      enabled: process.env.CRON_MANAGER_ENABLED,
+      querySecret: process.env.CRON_MANAGER_QUERY_SECRET,
+    },
   }));
   ```
 
@@ -176,7 +191,7 @@ Create an instance of CronManager by passing the required dependencies specified
 ```typescript
 // src/cron-config/cron-config.module.ts
 
-import { CronManager } from '@leravise/cron-manager';
+import { CronManager } from 'nest-cron-manager';
 import { CacheService } from '@/cache/cache.service';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -203,6 +218,7 @@ import { CronJob } from './cron-job.model';
           cronConfigRepository,
           cronJobRepository,
           redisService,
+          ormType: 'typeorm',
         }),
       inject: [
         ConfigService,
@@ -219,89 +235,143 @@ export class CronConfigModule {}
 
 ### Executing cron jobs
 
-To execute cron jobs, use the `handleJob` method of the `CronManager` class:
+Depending on the specified jobType when creating your cronConfig, there are three different ways the cronManager may execute the job:
 
-PS: It is recommended to use the function name as the cron config name.
-You created a cron config with the name `doSomething` and you want to manage the cron job execution which is scheduled to run every 5 minutes.
+1. `callback`: The cron job will execute a callback function passed to the `handleJob` method of the `CronManager` class.
 
-This is how you must have created the cron configc:
+   ```sh
+   curl -X 'POST' \
+     'http://localhost:3000/v1/inventory/cron-config' \
+     -H 'accept: application/json' \
+     -H 'Content-Type: application/json' \
+     -d '{
+     "name": "doSomething",
+     "jobType": "callback",
+     "enabled": true,
+     "context": "{
+       \"distributed\": true,
+       \"ttl\": 20,
+       \"[key]\":\"value\"
+     }"
+   }'
+   ```
 
-```sh
-curl -X 'POST' \
-  'http://localhost:3000/v1/inventory/cron-config' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "name": "doSomething",
-  "enabled": true,
-  "context": "{
-    \"distributed\": true,
-    \"ttl\": 20,
-    \"[key]\":\"value\"
-  }"
-}'
-```
+   The `context` field is optional and can be used to pass additional configuration to the cron job.
 
-The `context` field is optional and can be used to pass additional configuration to the cron job.
+   In this example, we are passing a `distributed` flag to indicate that the job should be distributed across multiple instances of the application.
 
-In this example, we are passing a `distributed` flag to indicate that the job should be distributed across multiple instances of the application.
+   We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
 
-We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
+   Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler function.
 
-Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler function.
+   NB: The context field must be a valid JSON string.
 
-NB: The context field must be a valid JSON string.
+   To execute cron jobs, use the `handleJob` method of the `CronManager` class:
 
-```typescript
-import { CronManager } from '@leravise/cron-manager';
-import { Cron, CronExpression } from '@nestjs/schedule';
+   PS: Although for this jobType you are not required to use the function name as the cron config name, it is generally recommended to do so for consistency as you would see in other jobTypes.
 
-@Injectable()
-export class SomeService {
-  constructor(private readonly cronManager: CronManager) {}
+   Below is an example of how to execute a cron job using the `handleJob` method:
 
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  async doSomething() {
-    await this.cronManager.handleJob(
-      'doSomething', // It is recommended to use the function name as the cron config name
-      async (context: Record<string, any>, config: Record<string, any>) => {
-        const events = [];
-        // Other variables
+   ```typescript
+   import { CronManager } from 'nest-cron-manager';
+   import { Cron, CronExpression } from '@nestjs/schedule';
 
-        try {
-          // Perform some operation
+   @Injectable()
+   export class SomeService {
+     constructor(private readonly cronManager: CronManager) {}
 
-          // Log success
-          events.push({
-            action: 'Operation 1',
-            status: 'success',
-            error: null,
-          });
+     @Cron(CronExpression.EVERY_5_MINUTES)
+     async doSomething() {
+       await this.cronManager.handleJob(
+         'doSomething', // You are required to use the function name as the cron config name
+         async (context: Record<string, any>, config: Record<string, any>) => {
+           const events = [];
+           // Other variables
 
-          // Perform another operation
+           try {
+             // Perform some operation
 
-          // Log success
-          events.push({
-            action: 'Operation 2',
-            total: 5,
-          });
+             // Log success
+             events.push({
+               action: 'Operation 1',
+               status: 'success',
+               error: null,
+             });
 
-          // Return events.
-          return events;
-        } catch (error) {
-          // Handle error
+             // Perform another operation
 
-          // Log error
-          events.push({
-            status: 'error',
-            error: error.message,
-          });
+             // Log success
+             events.push({
+               action: 'Operation 2',
+               total: 5,
+             });
 
-          // Rethrow error. This is important to ensure the job is marked as failed
-          throw new Error(JSON.stringify(events));
-        }
-      },
-    );
-  }
-}
-```
+             // Return events.
+             return events;
+           } catch (error) {
+             // Handle error
+
+             // Log error
+             events.push({
+               status: 'error',
+               error: error.message,
+             });
+
+             // Rethrow error. This is important to ensure the job is marked as failed
+             throw new Error(JSON.stringify(events));
+           }
+         },
+       );
+     }
+   }
+   ```
+
+2. `method`: The cron job will execute a method defined on your `CronJobService` class. The method name must match the cronConfig name and you must provide the cronExpression.
+
+   ```sh
+    curl -X 'POST' \
+      'http://localhost:3000/v1/inventory/cron-config' \
+      -H 'accept: application/json' \
+      -H 'Content-Type: application/json' \
+      -d '{
+      "name": "doSomething",
+      "jobType": "method",
+      "enabled": false,
+      "cronExpression": "0 0 * * *",
+    }'
+   ```
+
+   Below is an example of how you may define your method on a `CronJobService` class:
+
+   ```typescript
+   //...
+
+   @Injectable()
+   export class CronJobService {
+     constructor(private readonly cronManager: CronManager) {}
+
+     async doSomething() {
+       // Perform some operation
+     }
+   }
+
+   //...
+   ```
+
+   NB: The method name must match the cronConfig name.
+
+3. `query`: The cron job will execute a query provided during the creation of the cronConfig. The query must be a valid SQL query.
+   Your query will be encrypted at rest with the query secret provided in your app config and will only be decrypted at runtime using the same secret.
+
+   ```sh
+    curl -X 'POST' \
+      'http://localhost:3000/v1/inventory/cron-config' \
+      -H 'accept: application/json' \
+      -H 'Content-Type: application/json' \
+      -d '{
+      "name": "doSomething",
+      "jobType": "query",
+      "enabled": false,
+      "query": "SELECT * FROM users",
+    }'
+   ```

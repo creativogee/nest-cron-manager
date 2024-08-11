@@ -1,5 +1,6 @@
 import { OnModuleInit } from '@nestjs/common';
 import { CronJob as Job } from 'cron';
+import crypto from 'crypto-js';
 import { validateRepos } from './helper';
 import {
   CreateCronConfig,
@@ -43,9 +44,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   onModuleInit() {
-    const config = this.configService.get('app');
+    const cronManager = this.configService.get('app.cronManager');
 
-    if (!config.cronManager) {
+    if (!cronManager?.enabled) {
       return;
     }
 
@@ -72,6 +73,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async createCronConfig(data: CreateCronConfig) {
+    if (data.jobType === 'query' && data.query) {
+      data.query = this.encryptQuery(data.query);
+    }
+
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
     if (['method', 'query'].includes(data.jobType)) {
@@ -90,6 +95,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       throw new Error('CronConfig not found');
     }
 
+    if (data.jobType === 'query' && data.query) {
+      data.query = this.encryptQuery(data.query);
+    }
+
     Object.assign(found, data);
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
@@ -104,7 +113,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   async handleJob(name: string, execution: JobExecution) {
     const config = this.configService.get('app');
 
-    if (!config.cronManager) {
+    if (!config?.cronManager?.enabled) {
       return;
     }
 
@@ -153,7 +162,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         result = await execution(context, config);
         status = 'Success';
       } catch (error) {
-        result = error;
+        result = error.message;
         status = 'Failed';
       }
 
@@ -208,7 +217,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
 
     if (cronConfig.jobType === 'query' && cronConfig.query) {
-      execution = async () => this.databaseOps.query(`${cronConfig.query}`);
+      const query = this.decryptQuery(cronConfig.query);
+
+      execution = async () => this.databaseOps.query(`${query}`);
     }
 
     if (!execution) {
@@ -260,5 +271,26 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     job.result = typeof result === 'object' ? JSON.stringify(result) : result;
 
     await this.databaseOps.saveCronJob(job);
+  }
+
+  private encryptQuery(text: string): string {
+    const secretKey = this.configService.get('app.cronManager.querySecret');
+
+    if (!secretKey) {
+      throw new Error('Query secret not found');
+    }
+
+    return crypto.AES.encrypt(text, secretKey).toString();
+  }
+
+  private decryptQuery(text: string): string {
+    const secretKey = this.configService.get('app.cronManager.querySecret');
+
+    if (!secretKey) {
+      throw new Error('Query secret not found');
+    }
+
+    const bytes = crypto.AES.decrypt(text, secretKey);
+    return bytes.toString(crypto.enc.Utf8);
   }
 }

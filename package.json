@@ -1,5 +1,5 @@
 {
-  "name": "@leravise/cron-manager",
+  "name": "nest-cron-manager",
   "version": "0.0.1",
   "main": "dist/index.js",
   "types": "dist/types.d.ts",
@@ -10,9 +10,11 @@
   },
   "devDependencies": {
     "@nestjs/common": "^10.3.10",
+    "@types/crypto-js": "^4.2.2",
     "typescript": "^5.5.4"
   },
   "dependencies": {
-    "cron": "^3.1.7"
+    "cron": "^3.1.7",
+    "crypto-js": "^4.2.0"
   }
 }

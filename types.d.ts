@@ -61,6 +61,8 @@ export interface CreateCronConfig {
   context?: any;
   cronExpression?: string;
   jobType?: 'callback' | 'method' | 'query';
+  query?: string;
+  dryRun?: boolean;
   enabled: boolean;
 }
 
@@ -70,6 +72,8 @@ export interface UpdateCronConfig {
   context?: any;
   cronExpression?: string;
   jobType?: 'callback' | 'method' | 'query';
+  query?: string;
+  dryRun?: boolean;
   enabled?: boolean;
 }
 
@@ -93,4 +97,16 @@ interface DatabaseOps {
   saveCronJob(data: any): Promise<any>;
   query(sql: string): Promise<any>;
   isTypeOrm(): boolean;
+}
+
+interface TypeormOperationsDeps {
+  cronConfigRepository: any;
+  cronJobRepository: any;
+  configService: any;
+}
+
+interface MongooseOperationsDeps {
+  cronConfigModel: any;
+  cronJobModel: any;
+  configService: any;
 }
