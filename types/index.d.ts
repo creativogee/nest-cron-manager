@@ -6,15 +6,16 @@ export class CronManager {
     cronJobRepository,
     redisService,
     ormType,
+    queryRunner,
   }: CronManagerDeps);
 
+  static JobType: Record<string, string>;
   checkInit(): boolean;
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
   /**
-   * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
+   * @param name - Must match exactly the name of the cronConfig
    * @param execution - The function to be executed
-   * @warning Failure to match these names WILL result in unexpected behavior
    */
   handleJob(
     name: string,
@@ -52,8 +53,8 @@ export interface CronManagerDeps {
   cronConfigRepository: any;
   cronJobRepository: any;
   redisService: any;
-  cronJobService?: any;
   ormType: 'typeorm' | 'mongoose';
+  queryRunner: any; // for typeorm only
 }
 
 export interface CreateCronConfig {
@@ -103,10 +104,10 @@ interface TypeormOperationsDeps {
   cronConfigRepository: any;
   cronJobRepository: any;
   configService: any;
+  queryRunner: any;
 }
 
 interface MongooseOperationsDeps {
   cronConfigModel: any;
   cronJobModel: any;
-  configService: any;
 }

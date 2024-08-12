@@ -20,14 +20,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private cronConfigRepository: any;
   private cronJobRepository: any;
   private redisService: any;
-  private cronJobService: any;
   private ormType: 'typeorm' | 'mongoose';
+  private queryRunner: any;
   private databaseOps: DatabaseOps;
   private cronJobs: Map<string, Job> = new Map();
 
   static readonly JobType = {
     INLINE: 'inline',
-    METHOD: 'method',
     QUERY: 'query',
   };
 
@@ -38,7 +37,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     cronConfigRepository,
     cronJobRepository,
     redisService,
-    cronJobService,
+    queryRunner,
   }: CronManagerDeps) {
     this.logger = logger;
     this.configService = configService;
@@ -46,7 +45,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.redisService = redisService;
-    this.cronJobService = cronJobService;
+    this.queryRunner = queryRunner;
   }
 
   onModuleInit() {
@@ -56,14 +55,17 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return;
     }
 
-    this.databaseOps = validateDeps({
+    const deps = validateDeps({
       cronConfigRepository: this.cronConfigRepository,
       cronJobRepository: this.cronJobRepository,
       ormType: this.ormType,
       configService: this.configService,
       logger: this.logger,
       redisService: this.redisService,
+      queryRunner: this.queryRunner,
     });
+
+    this.databaseOps = deps.databaseOps;
 
     this.initializeJobs();
   }
@@ -76,7 +78,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       !!this.cronJobRepository &&
       !!this.redisService &&
       !!this.databaseOps &&
-      !!this.cronJobService &&
       !!this.ormType
     );
   }
@@ -88,7 +89,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
-    if ([CronManager.JobType.METHOD, CronManager.JobType.QUERY].includes(data.jobType)) {
+    if ([CronManager.JobType.QUERY].includes(data.jobType)) {
       this.resetJobs();
     }
 
@@ -104,7 +105,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       throw new Error('CronConfig not found');
     }
 
-    if (data.jobType === 'query' && data.query) {
+    if (data.jobType === CronManager.JobType.QUERY && data.query) {
       data.query = this.encryptQuery(data.query);
     }
 
@@ -112,7 +113,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
 
-    if (['method', 'query'].includes(data.jobType)) {
+    if ([CronManager.JobType.QUERY].includes(data.jobType)) {
       this.resetJobs();
     }
 
@@ -120,9 +121,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   /**
-   * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
+   * @param name - Must match exactly the name of the cronConfig
    * @param execution - The function to be executed
-   * @warning Failure to match these names WILL result in unexpected behavior
    */
   async handleJob(name: string, execution: JobExecution) {
     const config = this.configService.get('app');
@@ -144,9 +144,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       const { job, context, dryRun } = startedJob || {};
 
+      // Here, if job is falsy it can only be because it's a dry run
+      // If it's not a dry run, we throw an error
       if (!job && !dryRun) {
-        this.logger.log(`Job: ${name} not found or disabled - Not a dry run`);
-        return;
+        throw new Error(`Job: ${name}; Failed to start`);
       }
 
       let startMessage = `Job: ${name}; Started - Success`;
@@ -183,6 +184,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       if (!dryRun && job) {
         await this.endJob({ job, status, result });
       }
+    } catch (error) {
+      this.logger.log(error.message);
     } finally {
       if (status) {
         let endMessage = `Job: ${name}; Ended - ${status}`;
@@ -230,19 +233,20 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private async executeJob(cronConfig: CronConfig) {
     let execution: JobExecution;
 
-    if (cronConfig.jobType === CronManager.JobType.METHOD) {
-      execution = this.cronJobService?.[cronConfig.name];
-    }
+    if (cronConfig.jobType === CronManager.JobType.QUERY) {
+      if (!cronConfig.query) {
+        this.logger.log(`Job: ${cronConfig.name} query not found`);
+        return;
+      }
 
-    if (cronConfig.jobType === CronManager.JobType.QUERY && cronConfig.query) {
       const query = this.decryptQuery(cronConfig.query);
 
       execution = async () => this.databaseOps.query(`${query}`);
-    }
 
-    if (!execution) {
-      this.logger.error(`Job: Execution function not defined for ${cronConfig.name}`);
-      return;
+      if (!execution) {
+        this.logger.log(`Job: ${cronConfig.name} query failed to execute`);
+        return;
+      }
     }
 
     await this.handleJob(cronConfig.name, execution);
@@ -265,8 +269,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     });
 
     if (!cronConfig?.enabled || cronConfig?.deletedAt) {
-      this.logger.log(`Job: ${name} not found or disabled`);
-      return;
+      throw new Error(`Job: ${name} not found or disabled`);
     }
 
     let cronJob: CronJob;

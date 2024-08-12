@@ -193,29 +193,30 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
 Create an instance of CronManager by passing the required dependencies specified in `CronManagerDeps`:
 
 ```typescript
-// src/cron-config/cron-config.module.ts
+// src/cron/cron.module.ts
 
 import { CacheModule } from '@/cache/cache.module';
 import { CacheService } from '@/cache/cache.service';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
+import { getEntityManagerToken, getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { CronManager } from 'nest-cron-manager';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { CronConfigController } from './cron-config.controller';
 import { CronConfig } from './cron-config.model';
 import { CronJob } from './cron-job.model';
 
 @Module({
   controllers: [CronConfigController],
-  imports: [TypeOrmModule.forFeature([CronConfig, CronJob]), CacheModule],
+  imports: [CacheModule, TypeOrmModule.forFeature([CronConfig, CronJob])],
   providers: [
     {
       provide: CronManager,
-      useFactory: (
-        configService: ConfigService,
+      useFactory: async (
+        entityManager: EntityManager,
         cronConfigRepository: Repository<CronConfig>,
         cronJobRepository: Repository<CronJob>,
+        configService: ConfigService,
         redisService: CacheService,
       ) =>
         new CronManager({
@@ -225,23 +226,25 @@ import { CronJob } from './cron-job.model';
           cronJobRepository,
           redisService,
           ormType: 'typeorm',
+          queryRunner: entityManager.query,
         }),
       inject: [
-        ConfigService,
+        getEntityManagerToken(),
         getRepositoryToken(CronConfig),
         getRepositoryToken(CronJob),
+        ConfigService,
         CacheService,
       ],
     },
   ],
   exports: [CronManager],
 })
-export class CronConfigModule {}
+export class CronModule {}
 ```
 
 ### Executing cron jobs
 
-Depending on the specified jobType when creating your cronConfig, there are three different ways the cronManager may execute the job:
+Depending on the specified jobType when creating your cronConfig, there are different ways the cronManager may execute the job:
 
 1. `inline`: The cron job will execute a inline function passed to the `handleJob` method of the `CronManager` class.
 
@@ -274,20 +277,12 @@ Depending on the specified jobType when creating your cronConfig, there are thre
 
    To execute cron jobs, use the `handleJob` method of the `CronManager` class:
 
-   NB: While you could call the `handleJob` of the `cronManager` anywhere in your project, it is recommended to define all handlers in the `CronJobService` class. Benefits of this approach:
-
-   - Ensure unique job names across the application.
-   - Easily switch a handler function between the `inline` and `method` job types
-   - Manage all job handlers in one place
-
-   Below is an example of how to execute a cron job using the `handleJob` method:
-
    ```typescript
    import { CronManager } from 'nest-cron-manager';
    import { Cron, CronExpression } from '@nestjs/schedule';
 
    @Injectable()
-   export class CronJobService {
+   export class SomeService {
      constructor(private readonly cronManager: CronManager) {}
 
      @Cron(CronExpression.EVERY_5_MINUTES)
@@ -336,41 +331,9 @@ Depending on the specified jobType when creating your cronConfig, there are thre
    }
    ```
 
-2. `method`: The cron job will execute a method defined on your `CronJobService` class. The method name MUST match the cronConfig name and you must provide the cronExpression.
-
-   ```sh
-    curl -X 'POST' \
-      'http://localhost:3000/v1/inventory/cron-config' \
-      -H 'accept: application/json' \
-      -H 'Content-Type: application/json' \
-      -d '{
-      "name": "doSomething",
-      "jobType": "method",
-      "enabled": false,
-      "cronExpression": "0 0 * * *",
-    }'
-   ```
-
-   Below is an example of how you may define your method on a `CronJobService` class:
-
-   ```typescript
-   //...
-
-   @Injectable()
-   export class CronJobService {
-     constructor(private readonly cronManager: CronManager) {}
-
-     async doSomething() {
-       // Perform some operation
-     }
-   }
-
-   //...
-   ```
-
    NB: The method name must match the cronConfig name.
 
-3. `query`: The cron job will execute a query provided during the creation of the cronConfig. The query must be a valid SQL query.
+2. `query`: The cron job will execute a query provided during the creation of the cronConfig. The query must be a valid SQL query.
    Your query will be encrypted at rest with the query secret provided in your app config and will only be decrypted at runtime using the same secret.
 
    ```sh

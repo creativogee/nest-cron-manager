@@ -11,11 +11,18 @@ export class TypeOrmOperations implements DatabaseOps {
   private cronConfigRepository: any;
   private cronJobRepository: any;
   private configService: any;
+  private queryRunner: any;
 
-  constructor({ cronConfigRepository, cronJobRepository, configService }: TypeormOperationsDeps) {
+  constructor({
+    cronConfigRepository,
+    cronJobRepository,
+    configService,
+    queryRunner,
+  }: TypeormOperationsDeps) {
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.configService = configService;
+    this.queryRunner = queryRunner;
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -31,11 +38,11 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async saveCronConfig(data: CronConfig): Promise<CronConfig> {
-    // before saving encrypt the query
     const querySecret = this.configService.get('app.cronManager.querySecret');
+
     if (data.jobType === 'query') {
       if (!querySecret) {
-        throw new Error('Query secret not found');
+        throw new Error('CronManager - Query secret not found');
       }
     }
     return this.cronConfigRepository.save(data);
@@ -50,7 +57,7 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async query(sql: string): Promise<any> {
-    return this.cronConfigRepository.query(sql);
+    return this.queryRunner(sql);
   }
 
   isTypeOrm(): boolean {
@@ -61,12 +68,10 @@ export class TypeOrmOperations implements DatabaseOps {
 export class MongooseOperations implements DatabaseOps {
   private cronConfigModel: any;
   private cronJobModel: any;
-  private configService: any;
 
-  constructor({ cronConfigModel, cronJobModel, configService }: MongooseOperationsDeps) {
+  constructor({ cronConfigModel, cronJobModel }: MongooseOperationsDeps) {
     this.cronConfigModel = cronConfigModel;
     this.cronJobModel = cronJobModel;
-    this.configService = configService;
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -94,7 +99,7 @@ export class MongooseOperations implements DatabaseOps {
   }
 
   async query(sql: string): Promise<any> {
-    throw new Error('Raw SQL queries are not supported in Mongoose');
+    throw new Error('CronManager - Raw SQL queries are not supported in Mongoose');
   }
 
   isTypeOrm(): boolean {
@@ -109,25 +114,30 @@ export const validateDeps = ({
   ormType,
   logger,
   redisService,
+  queryRunner,
 }: CronManagerDeps) => {
   if (['typeorm', 'mongoose'].indexOf(ormType) === -1) {
-    throw new Error('Invalid ORM type');
+    throw new Error('CronManager - Invalid ORM type');
+  }
+
+  if (ormType === 'typeorm' && !queryRunner) {
+    throw new Error('CronManager - Entity manager not provided');
   }
 
   if (!logger) {
-    throw new Error('Logger not provided');
+    throw new Error('CronManager - Logger not provided');
   }
 
   if (!redisService) {
-    throw new Error('Redis service not provided');
+    throw new Error('CronManager - Redis service not provided');
   }
 
   if (!configService) {
-    throw new Error('Config service not provided');
+    throw new Error('CronManager - Config service not provided');
   }
 
   if (!cronConfigRepository || !cronJobRepository) {
-    throw new Error('Repositories not provided');
+    throw new Error('CronManager - Repositories not provided');
   }
 
   let databaseOps: DatabaseOps;
@@ -139,27 +149,31 @@ export const validateDeps = ({
       !cronConfigRepository.metadata.connection ||
       !cronJobRepository.metadata.connection
     ) {
-      throw new Error('Invalid TypeORM repositories');
+      throw new Error('CronManager - Invalid TypeORM repositories');
     }
 
-    databaseOps = new TypeOrmOperations({ cronConfigRepository, cronJobRepository, configService });
+    databaseOps = new TypeOrmOperations({
+      cronConfigRepository,
+      cronJobRepository,
+      configService,
+      queryRunner,
+    });
   }
 
   if (ormType === 'mongoose') {
     if (!cronConfigRepository.prototype || !cronJobRepository.prototype) {
-      throw new Error('Invalid Mongoose repositories');
+      throw new Error('CronManager - Invalid Mongoose repositories');
     }
 
     databaseOps = new MongooseOperations({
       cronConfigModel: cronConfigRepository,
       cronJobModel: cronJobRepository,
-      configService,
     });
   }
 
   if (!databaseOps) {
-    throw new Error('Invalid database operations');
+    throw new Error('CronManager - Invalid database operations');
   }
 
-  return databaseOps;
+  return { databaseOps };
 };
