@@ -218,6 +218,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     if (
       !cronConfig.enabled ||
       cronConfig.deletedAt ||
+      !cronConfig.cronExpression ||
       cronConfig.jobType === CronManager.JobType.INLINE
     ) {
       return;
@@ -226,6 +227,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     const job = new Job(cronConfig.cronExpression, () => {
       this.executeJob(cronConfig);
     });
+
     job.start();
     this.cronJobs.set(cronConfig.name, job);
   }
