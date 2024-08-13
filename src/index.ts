@@ -49,12 +49,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   onModuleInit() {
-    const cronManager = this.configService.get('app.cronManager');
-
-    if (!cronManager?.enabled) {
-      return;
-    }
-
     const deps = validateDeps({
       cronConfigRepository: this.cronConfigRepository,
       cronJobRepository: this.cronJobRepository,
