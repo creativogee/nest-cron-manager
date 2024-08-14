@@ -2,7 +2,7 @@
 
 ## Overview
 
-`nest-cron-manager` is a TypeScript-based library designed to manage and execute cron jobs efficiently. It provides a robust interface for scheduling, executing, and logging cron jobs with support for Redis-based locking mechanisms to ensure job execution integrity.
+This project, `nest-cron-manager`, is a TypeScript-based library designed to manage and execute cron jobs efficiently within a NestJS application. It provides a robust interface for scheduling, executing, and logging cron jobs, with support for Redis-based locking mechanisms to ensure job execution integrity. The library leverages ORM frameworks like TypeORM or Mongoose for database operations and is designed to be extensible, allowing for easy integration with other ORMs in the future. It integrates seamlessly with NestJS's dependency injection system.
 
 ## Installation
 
