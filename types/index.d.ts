@@ -19,11 +19,31 @@ export class CronManager {
    */
   handleJob(
     name: string,
-    execution: (context: {}, config: Record<string, any>) => Promise<any>,
+    execution: (
+      context: Record<string, any>,
+      config: Record<string, any>,
+      lens: Lens,
+    ) => Promise<any>,
   ): Promise<void>;
 }
 
-export type JobExecution = (context?: JobContext, config?: Record<string, any>) => Promise<any>;
+export interface Frame {
+  title: string;
+  message: string;
+  [key: string]: any;
+}
+
+export class Lens {
+  constructor();
+  capture(action: Frame): void;
+  getFrames(): string;
+}
+
+export type JobExecution = (
+  context?: JobContext,
+  config?: Record<string, any>,
+  lens?: Lens,
+) => Promise<any>;
 
 export interface CronConfig {
   id: number;
@@ -54,7 +74,7 @@ export interface CronManagerDeps {
   cronJobRepository: any;
   redisService: any;
   ormType: 'typeorm' | 'mongoose';
-  queryRunner: any; // for typeorm only
+  queryRunner?: any; // for typeorm only
 }
 
 export interface CreateCronConfig {

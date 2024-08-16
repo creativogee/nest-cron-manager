@@ -3,6 +3,7 @@ import {
   CronConfig,
   CronManagerDeps,
   DatabaseOps,
+  Frame,
   MongooseOperationsDeps,
   TypeormOperationsDeps,
 } from '../types';
@@ -120,10 +121,6 @@ export const validateDeps = ({
     throw new Error('CronManager - Invalid ORM type');
   }
 
-  if (ormType === 'typeorm' && !queryRunner) {
-    throw new Error('CronManager - Entity manager not provided');
-  }
-
   if (!logger) {
     throw new Error('CronManager - Logger not provided');
   }
@@ -177,3 +174,15 @@ export const validateDeps = ({
 
   return { databaseOps };
 };
+
+export class Lens {
+  private frames: Frame[] = [];
+
+  capture(action: Frame) {
+    this.frames.push(action);
+  }
+
+  getFrames() {
+    return JSON.stringify(this.frames);
+  }
+}

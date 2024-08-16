@@ -10,9 +10,10 @@ import {
   DatabaseOps,
   EndJob,
   JobExecution,
+  Lens as LensInterface,
   UpdateCronConfig,
 } from '../types';
-import { validateDeps } from './helper';
+import { Lens, validateDeps } from './helper';
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
@@ -167,11 +168,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       this.logger.log(startMessage);
 
+      const lens: LensInterface = new Lens();
+
       try {
-        result = await execution(context, config);
+        await execution(context, config, lens);
+        result = lens.getFrames();
         status = 'Success';
       } catch (error) {
-        result = error.message;
+        lens.capture({ title: 'Error', message: error.message });
+        result = lens.getFrames();
         status = 'Failed';
       }
 

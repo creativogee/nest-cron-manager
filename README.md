@@ -18,10 +18,16 @@ npm install nest-cron-manager
 
 Before using the `nest-cron-manager` library, ensure the following requirements are met:
 
-- Install `ioredis`,`@nestjs/config` and `typeorm`/`mongoose` packages:
+- Install `ioredis`,
+- Install `@nestjs/config`
+- Install`@nestjs/schedule`
+- Install one of the following ORM packages:
+
+  - `typeorm` `@nestjs/typeorm` `pg` if you are using TypeORM as your ORM
+  - `@nestjs/mongoose` `mongoose` if you are using Mongoose as your ORM
 
   ```sh
-  npm install ioredis typeorm @nestjs/config
+  npm install ioredis typeorm @nestjs/config @nestjs/schedule @nestjs/typeorm pg
   ```
 
 - Create `CronConfig` and `CronJob` models in your project which implement the `CronConfigInterface` and `CronJobInterface` respectively.
@@ -213,7 +219,6 @@ import { CronJob } from './cron-job.model';
     {
       provide: CronManager,
       useFactory: async (
-        entityManager: EntityManager,
         cronConfigRepository: Repository<CronConfig>,
         cronJobRepository: Repository<CronJob>,
         configService: ConfigService,
@@ -226,10 +231,8 @@ import { CronJob } from './cron-job.model';
           cronJobRepository,
           redisService,
           ormType: 'typeorm',
-          queryRunner: entityManager.query,
         }),
       inject: [
-        getEntityManagerToken(),
         getRepositoryToken(CronConfig),
         getRepositoryToken(CronJob),
         ConfigService,
@@ -241,6 +244,18 @@ import { CronJob } from './cron-job.model';
 })
 export class CronModule {}
 ```
+
+### CronManager Dependencies
+
+| Dependency           | Description                                                           | required |
+| -------------------- | --------------------------------------------------------------------- | -------- |
+| logger               | A logger instance                                                     | true     |
+| configService        | Your app's config service instance                                    | true     |
+| cronConfigRepository | The repository for the `CronConfig` model                             | true     |
+| cronJobRepository    | The repository for the `CronJob` model                                | true     |
+| redisService         | A cache service instance                                              | true     |
+| ormType              | The ORM type to use (currently only supports `typeorm` or `mongoose`) | true     |
+| queryRunner          | A query runner function (only required for `typeorm`)                 | false    |
 
 ### Executing cron jobs
 
@@ -277,9 +292,13 @@ Depending on the specified jobType when creating your cronConfig, there are diff
 
    To execute cron jobs, use the `handleJob` method of the `CronManager` class:
 
+   You can access the `lens` object which is an instance of the `Lens` class to capture logs and metrics for the job.
+
    ```typescript
    import { CronManager } from 'nest-cron-manager';
    import { Cron, CronExpression } from '@nestjs/schedule';
+   import { Injectable } from '@nestjs/common';
+   import { Lens } from 'nest-cron-manager/types';
 
    @Injectable()
    export class SomeService {
@@ -289,42 +308,29 @@ Depending on the specified jobType when creating your cronConfig, there are diff
      async doSomething() {
        await this.cronManager.handleJob(
          'doSomething',
-         async (context: Record<string, any>, config: Record<string, any>) => {
-           const events = [];
-           // Other variables
+         async (context: Record<string, any>, config: Record<string, any>, lens: Lens) => {
+           // Variables here
 
-           try {
-             // Perform some operation
+           // Perform an operation
 
-             // Log success
-             events.push({
-               action: 'Operation 1',
-               status: 'success',
-               error: null,
-             });
+           // Capture logs and metrics
+           lens.capture({
+             title: 'Operation 1',
+             message: 'Operation 1 successful',
+           });
 
-             // Perform another operation
+           // Perform another operation
 
-             // Log success
-             events.push({
-               action: 'Operation 2',
-               total: 5,
-             });
+           // Capture logs and metrics
+           lens.capture({
+             title: 'Operation 2',
+             message: 'Operation 2 successful',
+             total: 5,
+             // Add any other data you want to capture
+           });
 
-             // Return events.
-             return events;
-           } catch (error) {
-             // Handle error
-
-             // Log error
-             events.push({
-               status: 'error',
-               error: error.message,
-             });
-
-             // Rethrow error. This is important to ensure the job is marked as failed
-             throw new Error(JSON.stringify(events));
-           }
+           // If an error is thrown, the job will be marked as failed
+           // throw new Error('your error message');
          },
        );
      }
