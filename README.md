@@ -16,6 +16,8 @@ npm install nest-cron-manager
 
 ### Prerequisites
 
+Please see the [repository](https://github.com/creativogee/nest-cron-manager/tree/main/examples) for examples of how to use the library.
+
 Before using the `nest-cron-manager` library, ensure the following requirements are met:
 
 - Install `ioredis`,
@@ -33,7 +35,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
 - Create `CronConfig` and `CronJob` models in your project which implement the `CronConfigInterface` and `CronJobInterface` respectively.
 
   ```typescript
-  // src/cron-config/cron-config.model.ts
+  // src/cron-manager/cron-config.model.ts
 
   import { CronManager } from 'nest-cron-manager';
   import {
@@ -78,7 +80,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
   ```
 
   ```typescript
-  // src/cron-config/cron-job.model.ts
+  // src/cron-manager/cron-job.model.ts
 
   import { Column, Entity, Index, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
   import { CronConfig } from './cron-config.model';
@@ -135,6 +137,8 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
             body: "*"
         };
     };
+
+    // Add other service methods as needed. See the `CronManager` class for available methods.
   }
 
   ```
@@ -142,7 +146,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
 - Create a `CronConfigController` in your project to handle the creation and updating of cron configurations.
 
   ```typescript
-  // src/cron-config/cron-config.controller.ts
+  // src/cron-manager/cron-config.controller.ts
 
   import { CronManager } from 'nest-cron-manager';
   import { Controller } from '@nestjs/common';
@@ -165,6 +169,8 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
     async updateCronConfig(data: UpdateCronConfigRequest.AsObject) {
       return this.cronManager.updateCronConfig(data);
     }
+
+    // Add other controller methods as needed. See the `CronManager` class for available methods.
   }
   ```
 
@@ -199,10 +205,12 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
 Create an instance of CronManager by passing the required dependencies specified in `CronManagerDeps`:
 
 ```typescript
-// src/cron/cron.module.ts
+// src/cron-manager/cron-manager.module.ts
 
 import { CacheModule } from '@/cache/cache.module';
 import { CacheService } from '@/cache/cache.service';
+import { PostModule } from '@/post/post.module';
+import { UserModule } from '@/user/user.module';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getEntityManagerToken, getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
@@ -211,11 +219,19 @@ import { EntityManager, Repository } from 'typeorm';
 import { CronConfigController } from './cron-config.controller';
 import { CronConfig } from './cron-config.model';
 import { CronJob } from './cron-job.model';
+import { CronJobService } from './cron-job.service';
+import { ProductModule } from './product/product.module';
 
 @Module({
   controllers: [CronConfigController],
-  imports: [CacheModule, TypeOrmModule.forFeature([CronConfig, CronJob])],
+  imports: [
+    CacheModule,
+    TypeOrmModule.forFeature([CronConfig, CronJob]),
+    // Be mindful of circular dependencies for modules which import the CronMangerModule
+    forwardRef(() => ProductModule),
+  ],
   providers: [
+    CronJobService,
     {
       provide: CronManager,
       useFactory: async (
@@ -223,6 +239,8 @@ import { CronJob } from './cron-job.model';
         cronJobRepository: Repository<CronJob>,
         configService: ConfigService,
         redisService: CacheService,
+        cronJobService: CronJobService,
+        entityManager: EntityManager,
       ) =>
         new CronManager({
           logger: new Logger(CronManager.name),
@@ -230,6 +248,8 @@ import { CronJob } from './cron-job.model';
           cronConfigRepository,
           cronJobRepository,
           redisService,
+          cronJobService,
+          entityManager,
           ormType: 'typeorm',
         }),
       inject: [
@@ -237,12 +257,14 @@ import { CronJob } from './cron-job.model';
         getRepositoryToken(CronJob),
         ConfigService,
         CacheService,
+        CronJobService,
+        getEntityManagerToken(),
       ],
     },
   ],
   exports: [CronManager],
 })
-export class CronModule {}
+export class CronMangerModule {}
 ```
 
 ### CronManager Dependencies
@@ -255,7 +277,7 @@ export class CronModule {}
 | cronJobRepository    | The repository for the `CronJob` model                                | true     |
 | redisService         | A cache service instance                                              | true     |
 | ormType              | The ORM type to use (currently only supports `typeorm` or `mongoose`) | true     |
-| queryRunner          | A query runner function (only required for `typeorm`)                 | false    |
+| entityManager        | The entity manager for `typeorm` only                                 | true     |
 
 ### Executing cron jobs
 
@@ -354,3 +376,35 @@ Depending on the specified jobType when creating your cronConfig, there are diff
       "query": "SELECT * FROM users",
     }'
    ```
+
+3. `method`: The cron job will execute a method defined on your `CronJobService` class. The method name MUST match the cronConfig name and you must provide the cronExpression.
+
+```sh
+ curl -X 'POST' \
+   'http://localhost:3000/v1/inventory/cron-config' \
+   -H 'accept: application/json' \
+   -H 'Content-Type: application/json' \
+   -d '{
+   "name": "doSomething",
+   "jobType": "method",
+   "enabled": false,
+   "cronExpression": "0 0 * * *",
+ }'
+```
+
+Below is an example of how you may define your method on a `CronJobService` class:
+
+```typescript
+// omitted for brevity
+
+@Injectable()
+export class CronJobService {
+  constructor() {}
+
+  async doSomething() {
+    // Perform some operation
+  }
+}
+
+// omitted for brevity
+```

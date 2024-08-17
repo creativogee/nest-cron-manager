@@ -22,13 +22,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private cronJobRepository: any;
   private redisService: any;
   private ormType: 'typeorm' | 'mongoose';
-  private queryRunner: any;
+  private entityManager: any;
+  private cronJobService: any;
   private databaseOps: DatabaseOps;
   private cronJobs: Map<string, Job> = new Map();
 
   static readonly JobType = {
     INLINE: 'inline',
     QUERY: 'query',
+    METHOD: 'method',
   };
 
   constructor({
@@ -38,7 +40,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     cronConfigRepository,
     cronJobRepository,
     redisService,
-    queryRunner,
+    cronJobService,
+    entityManager,
   }: CronManagerDeps) {
     this.logger = logger;
     this.configService = configService;
@@ -46,7 +49,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.redisService = redisService;
-    this.queryRunner = queryRunner;
+    this.entityManager = entityManager;
+    this.cronJobService = cronJobService;
   }
 
   onModuleInit() {
@@ -57,7 +61,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       configService: this.configService,
       logger: this.logger,
       redisService: this.redisService,
-      queryRunner: this.queryRunner,
+      entityManager: this.entityManager,
     });
 
     this.databaseOps = deps.databaseOps;
@@ -66,25 +70,52 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   checkInit() {
-    return (
-      !!this.logger &&
-      !!this.configService &&
-      !!this.cronConfigRepository &&
-      !!this.cronJobRepository &&
-      !!this.redisService &&
-      !!this.databaseOps &&
-      !!this.ormType
-    );
+    const statuses = [
+      {
+        name: 'logger',
+        status: this.logger ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'configService',
+        status: this.configService ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'cronConfigRepository',
+        status: this.cronConfigRepository ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'cronJobRepository',
+        status: this.cronJobRepository ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'redisService',
+        status: this.redisService ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'ormType',
+        status: this.ormType ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'cronJobService',
+        status: this.cronJobService ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'entityManager',
+        status: this.entityManager ? 'OK' : 'Not Found',
+      },
+    ];
+
+    return statuses;
   }
 
   async createCronConfig(data: CreateCronConfig) {
-    if (data.jobType === CronManager.JobType.QUERY && data.query) {
+    if (data.query) {
       data.query = this.encryptQuery(data.query);
     }
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
-    if ([CronManager.JobType.QUERY].includes(data.jobType)) {
+    if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
       this.resetJobs();
     }
 
@@ -100,7 +131,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       throw new Error('CronConfig not found');
     }
 
-    if (data.jobType === CronManager.JobType.QUERY && data.query) {
+    if (data.query) {
       data.query = this.encryptQuery(data.query);
     }
 
@@ -108,16 +139,73 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
 
-    if ([CronManager.JobType.QUERY].includes(data.jobType)) {
+    if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
       this.resetJobs();
     }
 
     return { cronConfig };
   }
 
+  async listCronConfig(): Promise<CronConfig[]> {
+    return this.databaseOps.findCronConfig();
+  }
+
+  async toggleCronConfig(id: number) {
+    const cronConfig = await this.databaseOps.findOneCronConfig({
+      where: { id },
+    });
+
+    if (!cronConfig) {
+      throw new Error('CronConfig not found');
+    }
+
+    cronConfig.enabled = !cronConfig.enabled;
+
+    await this.databaseOps.saveCronConfig(cronConfig);
+
+    this.resetJobs();
+
+    return { cronConfig };
+  }
+
+  async enableAllCronConfig() {
+    const cronConfigs = await this.databaseOps.findCronConfig();
+
+    await Promise.all(
+      cronConfigs.map(async (cronConfig: CronConfig) => {
+        if (!cronConfig.enabled) {
+          cronConfig.enabled = true;
+          await this.databaseOps.saveCronConfig(cronConfig);
+        }
+      }),
+    );
+
+    await this.resetJobs();
+
+    return { cronConfigs };
+  }
+
+  async disableAllCronConfig() {
+    const cronConfigs = await this.databaseOps.findCronConfig();
+
+    await Promise.all(
+      cronConfigs.map(async (cronConfig: CronConfig) => {
+        if (cronConfig.enabled) {
+          cronConfig.enabled = false;
+          await this.databaseOps.saveCronConfig(cronConfig);
+        }
+      }),
+    );
+
+    await this.resetJobs();
+
+    return { cronConfigs };
+  }
+
   /**
-   * @param name - Must match exactly the name of the cronConfig
+   * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
    * @param execution - The function to be executed
+   * @warning Failure to match these names WILL result in unexpected behavior
    */
   async handleJob(name: string, execution: JobExecution) {
     const config = this.configService.get('app');
@@ -171,8 +259,16 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const lens: LensInterface = new Lens();
 
       try {
-        await execution(context, config, lens);
-        result = lens.getFrames();
+        result = await execution(context, config, lens);
+
+        if (result && job.config.jobType === CronManager.JobType.METHOD) {
+          result = JSON.stringify(result);
+        }
+
+        if (!result && !lens.isEmpty) {
+          result = lens.getFrames();
+        }
+
         status = 'Success';
       } catch (error) {
         lens.capture({ title: 'Error', message: error.message });
@@ -184,7 +280,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         await this.endJob({ job, status, result });
       }
     } catch (error) {
-      this.logger.log(error.message);
+      if (error.message) {
+        this.logger.log(error.message);
+      }
     } finally {
       if (status) {
         let endMessage = `Job: ${name}; Ended - ${status}`;
@@ -209,26 +307,26 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async initializeJobs() {
-    const cronConfigs = await this.databaseOps.findCronConfigs();
-    cronConfigs.forEach((cronConfig: CronConfig) => this.scheduleJob(cronConfig));
+    const cronConfigs = await this.databaseOps.findCronConfig();
+    await Promise.all(cronConfigs.map((cronConfig: CronConfig) => this.scheduleJob(cronConfig)));
+    this.logger.log('Total jobs scheduled: ' + this.cronJobs.size);
   }
 
   private async scheduleJob(cronConfig: CronConfig) {
     if (
-      !cronConfig.enabled ||
-      cronConfig.deletedAt ||
-      !cronConfig.cronExpression ||
-      cronConfig.jobType === CronManager.JobType.INLINE
+      cronConfig.enabled &&
+      !cronConfig.deletedAt &&
+      cronConfig.cronExpression &&
+      [CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(cronConfig.jobType)
     ) {
-      return;
+      const job = new Job(cronConfig.cronExpression, () => {
+        this.executeJob(cronConfig);
+      });
+
+      job.start();
+      this.cronJobs.set(cronConfig.name, job);
+      this.logger.log(`Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`);
     }
-
-    const job = new Job(cronConfig.cronExpression, () => {
-      this.executeJob(cronConfig);
-    });
-
-    job.start();
-    this.cronJobs.set(cronConfig.name, job);
   }
 
   private async executeJob(cronConfig: CronConfig) {
@@ -242,7 +340,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       const query = this.decryptQuery(cronConfig.query);
 
-      execution = async () => this.databaseOps.query(`${query}`);
+      execution = async () => this.databaseOps?.query(`${query}`);
 
       if (!execution) {
         this.logger.log(`Job: ${cronConfig.name} query failed to execute`);
@@ -250,18 +348,23 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }
     }
 
+    if (cronConfig.jobType === CronManager.JobType.METHOD) {
+      execution = this.cronJobService?.[cronConfig.name];
+    }
+
     await this.handleJob(cronConfig.name, execution);
   }
 
   private async resetJobs() {
-    const cronConfigs = await this.databaseOps.findCronConfigs();
+    const cronConfigs = await this.databaseOps.findCronConfig();
 
     this.cronJobs.forEach((job, name) => {
       job.stop();
       this.cronJobs.delete(name);
     });
 
-    cronConfigs.forEach((cronConfig: CronConfig) => this.scheduleJob(cronConfig));
+    await Promise.all(cronConfigs.map((cronConfig: CronConfig) => this.scheduleJob(cronConfig)));
+    this.logger.log('Total jobs scheduled: ' + this.cronJobs.size);
   }
 
   private async startJob(name: string) {
@@ -270,7 +373,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     });
 
     if (!cronConfig?.enabled || cronConfig?.deletedAt) {
-      throw new Error(`Job: ${name} not found or disabled`);
+      throw new Error();
     }
 
     let cronJob: CronJob;
@@ -314,5 +417,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const bytes = crypto.AES.decrypt(text, secretKey);
     return bytes.toString(crypto.enc.Utf8);
+  }
+}
+
+export function bindMethods(instance: any) {
+  const propertyNames = Object.getOwnPropertyNames(Object.getPrototypeOf(instance));
+  for (const propertyName of propertyNames) {
+    const propertyValue = instance[propertyName];
+    if (typeof propertyValue === 'function' && propertyName !== 'constructor') {
+      instance[propertyName] = propertyValue.bind(instance);
+    }
   }
 }

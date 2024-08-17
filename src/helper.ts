@@ -12,25 +12,25 @@ export class TypeOrmOperations implements DatabaseOps {
   private cronConfigRepository: any;
   private cronJobRepository: any;
   private configService: any;
-  private queryRunner: any;
+  private entityManager: any;
 
   constructor({
     cronConfigRepository,
     cronJobRepository,
     configService,
-    queryRunner,
+    entityManager,
   }: TypeormOperationsDeps) {
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.configService = configService;
-    this.queryRunner = queryRunner;
+    this.entityManager = entityManager;
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
     return this.cronConfigRepository.findOne(options);
   }
 
-  async findCronConfigs(options?: any): Promise<CronConfig[]> {
+  async findCronConfig(options?: any): Promise<CronConfig[]> {
     return this.cronConfigRepository.find(options);
   }
 
@@ -58,7 +58,7 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async query(sql: string): Promise<any> {
-    return this.queryRunner(sql);
+    return this.entityManager.query(sql);
   }
 
   isTypeOrm(): boolean {
@@ -79,7 +79,7 @@ export class MongooseOperations implements DatabaseOps {
     return this.cronConfigModel.findOne(options).exec();
   }
 
-  async findCronConfigs(options?: any): Promise<CronConfig[]> {
+  async findCronConfig(options?: any): Promise<CronConfig[]> {
     return this.cronConfigModel.find(options).exec();
   }
 
@@ -115,7 +115,7 @@ export const validateDeps = ({
   ormType,
   logger,
   redisService,
-  queryRunner,
+  entityManager,
 }: CronManagerDeps) => {
   if (['typeorm', 'mongoose'].indexOf(ormType) === -1) {
     throw new Error('CronManager - Invalid ORM type');
@@ -153,7 +153,7 @@ export const validateDeps = ({
       cronConfigRepository,
       cronJobRepository,
       configService,
-      queryRunner,
+      entityManager,
     });
   }
 
@@ -177,6 +177,10 @@ export const validateDeps = ({
 
 export class Lens {
   private frames: Frame[] = [];
+
+  get isEmpty() {
+    return this.frames.length === 0;
+  }
 
   capture(action: Frame) {
     this.frames.push(action);

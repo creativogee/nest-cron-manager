@@ -6,16 +6,24 @@ export class CronManager {
     cronJobRepository,
     redisService,
     ormType,
-    queryRunner,
+    entityManager,
   }: CronManagerDeps);
 
   static JobType: Record<string, string>;
-  checkInit(): boolean;
+
+  checkInit(): { name: string; status: string }[];
+
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
+  listCronConfig(): Promise<CronConfig[]>;
+  toggleCronConfig(id: number): Promise<{ cronConfig: any }>;
+  enableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
+  disableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
+
   /**
-   * @param name - Must match exactly the name of the cronConfig
+   * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
    * @param execution - The function to be executed
+   * @warning Failure to match these names WILL result in unexpected behavior
    */
   handleJob(
     name: string,
@@ -26,15 +34,20 @@ export class CronManager {
     ) => Promise<any>,
   ): Promise<void>;
 }
+/**
+ * This function binds all class methods to the class instance
+ */
+export function bindMethods(instance: any): void;
 
 export interface Frame {
   title: string;
-  message: string;
+  message?: string;
   [key: string]: any;
 }
 
 export class Lens {
   constructor();
+  isEmpty: boolean;
   capture(action: Frame): void;
   getFrames(): string;
 }
@@ -74,7 +87,8 @@ export interface CronManagerDeps {
   cronJobRepository: any;
   redisService: any;
   ormType: 'typeorm' | 'mongoose';
-  queryRunner?: any; // for typeorm only
+  cronJobService?: any;
+  entityManager?: any; // for typeorm only
 }
 
 export interface CreateCronConfig {
@@ -111,7 +125,7 @@ export interface JobContext {
 
 interface DatabaseOps {
   findOneCronConfig(options: any): Promise<CronConfig | null>;
-  findCronConfigs(options?: any): Promise<CronConfig[]>;
+  findCronConfig(options?: any): Promise<CronConfig[]>;
   createCronConfig(data: CreateCronConfig): CronConfig;
   saveCronConfig(data: CreateCronConfig): Promise<CronConfig>;
   createCronJob(data: any): CronJob;
@@ -124,7 +138,7 @@ interface TypeormOperationsDeps {
   cronConfigRepository: any;
   cronJobRepository: any;
   configService: any;
-  queryRunner: any;
+  entityManager: any;
 }
 
 interface MongooseOperationsDeps {
