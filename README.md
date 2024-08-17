@@ -20,13 +20,8 @@ Please see the [repository](https://github.com/creativogee/nest-cron-manager/tre
 
 Before using the `nest-cron-manager` library, ensure the following requirements are met:
 
-- Install `ioredis`,
-- Install `@nestjs/config`
-- Install`@nestjs/schedule`
-- Install one of the following ORM packages:
-
-  - `typeorm` `@nestjs/typeorm` `pg` if you are using TypeORM as your ORM
-  - `@nestjs/mongoose` `mongoose` if you are using Mongoose as your ORM
+- Install `ioredis`, `@nestjs/config`, `@nestjs/schedule`
+- Install `typeorm`, `@nestjs/typeorm`, `pg` or `@nestjs/mongoose`, `mongoose` depending on the ORM you are using.
 
   ```sh
   npm install ioredis typeorm @nestjs/config @nestjs/schedule @nestjs/typeorm pg
@@ -302,95 +297,95 @@ Depending on the specified jobType when creating your cronConfig, there are diff
    }'
    ```
 
-   The `context` field is optional and can be used to pass additional configuration to the cron job.
+The `context` field is optional and can be used to pass additional configuration to the cron job.
 
-   In this example, we are passing a `distributed` flag to indicate that the job should be distributed across multiple instances of the application.
+In this example, we are passing a `distributed` flag to indicate that the job should be distributed across multiple instances of the application.
 
-   We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
+We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
 
-   Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler function.
+Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler function.
 
-   NB: The context field must be a valid JSON string.
+NB: The context field must be a valid JSON string.
 
-   To execute cron jobs, use the `handleJob` method of the `CronManager` class:
+To execute cron jobs, use the `handleJob` method of the `CronManager` class:
 
-   You can access the `lens` object which is an instance of the `Lens` class to capture logs and metrics for the job.
+You can access the `lens` object which is an instance of the `Lens` class to capture logs and metrics for the job.
 
-   ```typescript
-   import { CronManager } from 'nest-cron-manager';
-   import { Cron, CronExpression } from '@nestjs/schedule';
-   import { Injectable } from '@nestjs/common';
-   import { Lens } from 'nest-cron-manager/types';
+```typescript
+import { CronManager } from 'nest-cron-manager';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { Injectable } from '@nestjs/common';
+import { Lens } from 'nest-cron-manager/types';
 
-   @Injectable()
-   export class SomeService {
-     constructor(private readonly cronManager: CronManager) {}
+@Injectable()
+export class SomeService {
+  constructor(private readonly cronManager: CronManager) {}
 
-     @Cron(CronExpression.EVERY_5_MINUTES)
-     async doSomething() {
-       await this.cronManager.handleJob(
-         'doSomething',
-         async (context: Record<string, any>, config: Record<string, any>, lens: Lens) => {
-           // Variables here
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async doSomething() {
+    await this.cronManager.handleJob(
+      'doSomething',
+      async (context: Record<string, any>, config: Record<string, any>, lens: Lens) => {
+        // Variables here
 
-           // Perform an operation
+        // Perform an operation
 
-           // Capture logs and metrics
-           lens.capture({
-             title: 'Operation 1',
-             message: 'Operation 1 successful',
-           });
+        // Capture logs and metrics
+        lens.capture({
+          title: 'Operation 1',
+          message: 'Operation 1 successful',
+        });
 
-           // Perform another operation
+        // Perform another operation
 
-           // Capture logs and metrics
-           lens.capture({
-             title: 'Operation 2',
-             message: 'Operation 2 successful',
-             total: 5,
-             // Add any other data you want to capture
-           });
+        // Capture logs and metrics
+        lens.capture({
+          title: 'Operation 2',
+          message: 'Operation 2 successful',
+          total: 5,
+          // Add any other data you want to capture
+        });
 
-           // If an error is thrown, the job will be marked as failed
-           // throw new Error('your error message');
-         },
-       );
-     }
-   }
-   ```
+        // If an error is thrown, the job will be marked as failed
+        // throw new Error('your error message');
+      },
+    );
+  }
+}
+```
 
-   NB: The method name must match the cronConfig name.
+NB: The method name must match the cronConfig name.
 
 2. `query`: The cron job will execute a query provided during the creation of the cronConfig. The query must be a valid SQL query.
    Your query will be encrypted at rest with the query secret provided in your app config and will only be decrypted at runtime using the same secret.
 
    ```sh
-    curl -X 'POST' \
-      'http://localhost:3000/v1/inventory/cron-config' \
-      -H 'accept: application/json' \
-      -H 'Content-Type: application/json' \
-      -d '{
-      "name": "doSomething",
-      "jobType": "query",
-      "enabled": false,
-      "query": "SELECT * FROM users",
-    }'
+   curl -X 'POST' \
+     'http://localhost:3000/v1/inventory/cron-config' \
+     -H 'accept: application/json' \
+     -H 'Content-Type: application/json' \
+     -d '{
+     "name": "doSomething",
+     "jobType": "query",
+     "enabled": false,
+     "query": "SELECT * FROM users",
+   }'
    ```
 
 3. `method`: The cron job will execute a method defined on your `CronJobService` class. The method name MUST match the cronConfig name and you must provide the cronExpression.
 
-```sh
- curl -X 'POST' \
-   'http://localhost:3000/v1/inventory/cron-config' \
-   -H 'accept: application/json' \
-   -H 'Content-Type: application/json' \
-   -d '{
-   "name": "doSomething",
-   "jobType": "method",
-   "enabled": false,
-   "cronExpression": "0 0 * * *",
- }'
-```
+   ```sh
+   curl -X 'POST' \
+     'http://localhost:3000/v1/inventory/cron-config' \
+     -H 'accept: application/json' \
+     -H 'Content-Type: application/json' \
+     -d '{
+     "name": "doSomething",
+     "jobType": "method",
+     "enabled": false,
+     "cronExpression": "0 0 * * *",
+   }'
+   ```
 
 Below is an example of how you may define your method on a `CronJobService` class:
 
