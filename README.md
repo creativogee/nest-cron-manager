@@ -278,7 +278,7 @@ export class CronMangerModule {}
 
 Depending on the specified jobType when creating your cronConfig, there are different ways the cronManager may execute the job:
 
-### 1. `inline`:
+#### 1. `inline`:
 
 The cron job will execute a inline function passed to the `handleJob` method of the `CronManager` class.
 
@@ -358,7 +358,7 @@ export class SomeService {
 
 NB: The method name must match the cronConfig name.
 
-### 2. `query`:
+#### 2. `query`:
 
 The cron job will execute a query provided during the creation of the cronConfig. The query must be a valid SQL query.
 Your query will be encrypted at rest with the query secret provided in your app config and will only be decrypted at runtime using the same secret.
@@ -376,7 +376,7 @@ curl -X 'POST' \
 }'
 ```
 
-### 3. `method`:
+#### 3. `method`:
 
 The cron job will execute a method defined on your `CronJobService` class. The method name MUST match the cronConfig name and you must provide the cronExpression.
 
