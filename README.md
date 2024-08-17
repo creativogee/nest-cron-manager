@@ -12,11 +12,11 @@ To install the package, use npm:
 npm install nest-cron-manager
 ```
 
-## Usage
-
-### Prerequisites
+## Getting Started
 
 Please see the [repository](https://github.com/creativogee/nest-cron-manager/tree/main/examples) for examples of how to use the library.
+
+### Prerequisites
 
 Before using the `nest-cron-manager` library, ensure the following requirements are met:
 
@@ -70,7 +70,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
     deletedAt?: Date;
 
     @OneToMany(() => CronJob, (cronJob) => cronJob.config)
-    jobs: CronJob[];
+    jobs: CronJobInterface[];
   }
   ```
 
@@ -88,7 +88,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
 
     @Index()
     @ManyToOne(() => CronConfig, (config) => config.jobs)
-    config: CronConfig;
+    config: CronJobInterface;
 
     @Column({ nullable: true, type: 'jsonb' })
     result?: any;
@@ -172,22 +172,35 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
 - Create a `CacheService` in your project and ensure it implements a `getClient` method.
 
   ```typescript
-  import { Injectable } from '@nestjs/common';
+  import { Injectable, OnModuleDestroy } from '@nestjs/common';
+  import { ConfigService } from '@nestjs/config';
+  import Redis from 'ioredis';
 
   @Injectable()
-  export class CacheService {
+  export class CacheService implements OnModuleDestroy {
+    private client: Redis;
+
+    constructor(private readonly config: ConfigService) {
+      this.client = new Redis(this.config.get('app.redisUrl'));
+    }
+
+    async onModuleDestroy() {
+      await this.client.quit();
+    }
+
     getClient(): Redis {
       return this.client;
     }
   }
   ```
 
-- Implement nestjs config service in your project.
+- Implement nestjs config service in your project. See the [nestjs config documentation](https://docs.nestjs.com/techniques/configuration) for more information.
 
   ```typescript
   import { registerAs } from '@nestjs/config';
 
-  export default registerAs('config', () => ({
+  export default registerAs('app', () => ({
+    redisUrl: process.env.REDIS_URL,
     cronManager: {
       enabled: process.env.CRON_MANAGER_ENABLED,
       querySecret: process.env.CRON_MANAGER_QUERY_SECRET,
@@ -264,27 +277,28 @@ export class CronMangerModule {}
 
 ### CronManager Dependencies
 
-| Dependency           | Description                                                           | required |
-| -------------------- | --------------------------------------------------------------------- | -------- |
-| logger               | A logger instance                                                     | true     |
-| configService        | Your app's config service instance                                    | true     |
-| cronConfigRepository | The repository for the `CronConfig` model                             | true     |
-| cronJobRepository    | The repository for the `CronJob` model                                | true     |
-| redisService         | A cache service instance                                              | true     |
-| ormType              | The ORM type to use (currently only supports `typeorm` or `mongoose`) | true     |
-| entityManager        | The entity manager for `typeorm` only                                 | true     |
+| Dependency           | Description                                                                | required |
+| -------------------- | -------------------------------------------------------------------------- | -------- |
+| logger               | A logger instance                                                          | true     |
+| configService        | Your app's config service instance                                         | true     |
+| cronConfigRepository | The repository for the `CronConfig` model                                  | true     |
+| cronJobRepository    | The repository for the `CronJob` model                                     | true     |
+| redisService         | A cache service instance                                                   | true     |
+| ormType              | The ORM type to use (currently only supports `typeorm` or `mongoose`)      | true     |
+| cronJobService       | This service will constitute the `method` jobType handlers to be triggered | false    |
+| entityManager        | This is the ORM's entity manager instance (for `typeorm` only)             | false    |
 
 ### Executing cron jobs
 
-Depending on the specified jobType when creating your cronConfig, there are different ways the cronManager may execute the job:
+Depending on the specified jobType when creating your cronConfig, there are different ways the `nest-cron-manager` may execute a job:
 
 #### 1. `inline`:
 
-The cron job will execute a inline function passed to the `handleJob` method of the `CronManager` class.
+Simply pass the `cronConfig` name and a callback function as first and second arguments respectively to the `handleJob` method of the `CronManager` class.
 
 ```sh
 curl -X 'POST' \
-  'http://localhost:3000/v1/inventory/cron-config' \
+  'https://server.com/v1/inventory/cron-config' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -308,8 +322,6 @@ We are also passing a `ttl` field to specify the time to live for the job lock i
 Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler function.
 
 NB: The context field must be a valid JSON string.
-
-To execute cron jobs, use the `handleJob` method of the `CronManager` class:
 
 You can access the `lens` object which is an instance of the `Lens` class to capture logs and metrics for the job.
 
@@ -378,7 +390,7 @@ curl -X 'POST' \
 
 #### 3. `method`:
 
-The cron job will execute a method defined on your `CronJobService` class. The method name MUST match the cronConfig name and you must provide the cronExpression.
+The `nest-cron-manager` will execute methods defined on your `CronJobService` class if the jobType is set to `method`, there is a valid cronExpression, and most importantly the method name matches an existing `CronConfig` name.
 
 ```sh
 curl -X 'POST' \
@@ -396,16 +408,21 @@ curl -X 'POST' \
 Below is an example of how you may define your method on a `CronJobService` class:
 
 ```typescript
-// omitted for brevity
+import { Injectable } from '@nestjs/common';
+import { bindMethods } from 'nest-cron-manager';
 
 @Injectable()
 export class CronJobService {
   constructor() {}
 
+  onModuleInit() {
+    // Bind all methods to the class instance
+    // This is necessary to ensure that the `this` context is maintained
+    bindMethods(this);
+  }
+
   async doSomething() {
     // Perform some operation
   }
 }
-
-// omitted for brevity
 ```
