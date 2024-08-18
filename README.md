@@ -1,4 +1,13 @@
-# nest-cron-manager
+<h1 align="center">
+  nest-cron-manager
+  
+</h1>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/nest-cron-manager"><img alt="NPM version" src="https://img.shields.io/npm/v/nest-cron-manager.svg"></a>
+  <a href="https://www.npmjs.com/package/nest-cron-manager"><img alt="NPM downloads" src="https://img.shields.io/npm/dw/nest-cron-manager.svg"></a>
+  <a href="https://www.paypal.com/donate?hosted_button_id=Z9NGDEGSC3LPY" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"></a>
+</p>
 
 ## Overview
 
@@ -6,10 +15,14 @@ This project, `nest-cron-manager`, is a TypeScript-based library designed to man
 
 ## Installation
 
-To install the package, use npm:
+To install, use:
 
 ```sh
 npm install nest-cron-manager
+
+# or
+
+yarn add nest-cron-manager
 ```
 
 ## Getting Started
@@ -105,7 +118,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
   ```
 
 - NB: You can implement whatever network and serialization protocol you want to use. For the purpose of this example, we will use gRPC.
-- Create these protobuf service definitions: `CreateCronConfig` and `UpdateCronConfig` in your project. For this example, we will use the inventory service.
+- Create these protobuf service definitions: `CreateCronConfig` and `UpdateCronConfig` in your project.
 
   ```protobuf
   syntax = "proto3";
@@ -132,8 +145,6 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
             body: "*"
         };
     };
-
-    // Add other service methods as needed. See the `CronManager` class for available methods.
   }
 
   ```
@@ -165,7 +176,7 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
       return this.cronManager.updateCronConfig(data);
     }
 
-    // Add other controller methods as needed. See the `CronManager` class for available methods.
+    // You have the flexibility to add additional methods/controllers as needed. The underlying data tables and their records are fully under your control, allowing you to interact with them as you see fit. However, the shcemas must continue to conform to the CronConfigInterface` and `CronJobInterface`.
   }
   ```
 
@@ -217,8 +228,6 @@ Create an instance of CronManager by passing the required dependencies specified
 
 import { CacheModule } from '@/cache/cache.module';
 import { CacheService } from '@/cache/cache.service';
-import { PostModule } from '@/post/post.module';
-import { UserModule } from '@/user/user.module';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getEntityManagerToken, getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
@@ -277,7 +286,7 @@ export class CronMangerModule {}
 
 ### CronManager Dependencies
 
-| Dependency           | Description                                                                | required |
+| Dependency           | Description                                                                | Required |
 | -------------------- | -------------------------------------------------------------------------- | -------- |
 | logger               | A logger instance                                                          | true     |
 | configService        | Your app's config service instance                                         | true     |
@@ -290,11 +299,11 @@ export class CronMangerModule {}
 
 ### Executing cron jobs
 
-Depending on the specified jobType when creating your cronConfig, there are different ways the `nest-cron-manager` may execute a job:
+Depending on the specified `jobType` when creating your cronConfig, there are different ways the `nest-cron-manager` may execute a job:
 
 #### 1. `inline`:
 
-Simply pass the `cronConfig` name and a callback function as first and second arguments respectively to the `handleJob` method of the `CronManager` class.
+Simply pass the `cronConfig` name and a callback function as first and second arguments respectively to the `handleJob` method of the `CronManager` class. The callback function will be executed at the specified cron interval. Ensure to pass the cronConfig name as the first argument to the `handleJob` method.
 
 ```sh
 curl -X 'POST' \
@@ -319,11 +328,11 @@ In this example, we are passing a `distributed` flag to indicate that the job sh
 
 We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
 
-Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler function.
+Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler.
 
 NB: The context field must be a valid JSON string.
 
-You can access the `lens` object which is an instance of the `Lens` class to capture logs and metrics for the job.
+You can access a `lens` object which is an instance of the `Lens` class to capture logs and metrics for the job.
 
 ```typescript
 import { CronManager } from 'nest-cron-manager';
@@ -368,33 +377,30 @@ export class SomeService {
 }
 ```
 
-NB: The method name must match the cronConfig name.
-
 #### 2. `query`:
 
-The cron job will execute a query provided during the creation of the cronConfig. The query must be a valid SQL query.
-Your query will be encrypted at rest with the query secret provided in your app config and will only be decrypted at runtime using the same secret.
+The `nest-cron-manager` will execute an sql query (must be valid) if you create a `CronConfig` with the jobType is set to `query`, and a valid cronExpression specified. The query will be encrypted at rest using the `querySecret` from the `configService`. During runtime, the same `querySecret` will be used to decrypt the query.
 
 ```sh
 curl -X 'POST' \
-  'http://localhost:3000/v1/inventory/cron-config' \
+  'https://server.com/v1/inventory/cron-config' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
   "name": "doSomething",
   "jobType": "query",
   "enabled": false,
-  "query": "SELECT * FROM users",
+  "query": "SELECT * FROM inventory",
 }'
 ```
 
 #### 3. `method`:
 
-The `nest-cron-manager` will execute methods defined on your `CronJobService` class if the jobType is set to `method`, there is a valid cronExpression, and most importantly the method name matches an existing `CronConfig` name.
+The `nest-cron-manager` will execute methods defined on your `CronJobService` class if you create a `CronConfig` with the jobType is set to `method`, and a valid cronExpression is provided. The `nest-cron-manager` identifies the method to execute by matching the `CronConfig` name with the method name so ensure they match.
 
 ```sh
 curl -X 'POST' \
-  'http://localhost:3000/v1/inventory/cron-config' \
+  'https://server.com/v1/inventory/cron-config' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -416,8 +422,7 @@ export class CronJobService {
   constructor() {}
 
   onModuleInit() {
-    // Bind all methods to the class instance
-    // This is necessary to ensure that the `this` context is maintained
+    // This is important to ensure that the `this` context is preserved
     bindMethods(this);
   }
 
@@ -426,3 +431,13 @@ export class CronJobService {
   }
 }
 ```
+
+Congratulations! You have successfully set up the `nest-cron-manager` library in your NestJS application. With this powerful tool, you can now manage your cron jobs with ease and confidence. The library provides you with the ability to enable or disable individual cron jobs or even all jobs at once, giving you full control over your scheduled tasks. This ensures that your cron jobs run as expected, improving the reliability and maintainability of your application.
+
+By integrating `nest-cron-manager`, you have taken a significant step towards automating and optimizing your application's background processes. Whether you need to schedule regular data backups, send periodic notifications, or perform routine maintenance tasks, this library has you covered.
+
+Thank you for using `nest-cron-manager`. I hope it enhances your development experience and helps you achieve your project goals. Stay tuned for more because they sure are coming!
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -11,8 +11,7 @@ export class CronManager {
 
   static JobType: Record<string, string>;
 
-  checkInit(): { name: string; status: string }[];
-
+  checkInit(): { name: string; status?: string; total?: number }[];
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
   listCronConfig(): Promise<CronConfig[]>;

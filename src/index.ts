@@ -103,6 +103,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         name: 'entityManager',
         status: this.entityManager ? 'OK' : 'Not Found',
       },
+      {
+        name: 'cronJobs',
+        status: 'OK',
+        total: this.cronJobs.size,
+      },
     ];
 
     return statuses;
