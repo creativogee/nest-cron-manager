@@ -176,7 +176,9 @@ Before using the `nest-cron-manager` library, ensure the following requirements 
       return this.cronManager.updateCronConfig(data);
     }
 
-    // You have the flexibility to add additional methods/controllers as needed. The underlying data tables and their records are fully under your control, allowing you to interact with them as you see fit. However, the shcemas must continue to conform to the CronConfigInterface` and `CronJobInterface`.
+    // You have the flexibility to add additional methods/controllers as needed. 
+    // The underlying data tables and their records are fully under your control, allowing you to interact with them as you see fit.
+    // However, the shcemas must continue to conform to the CronConfigInterface` and `CronJobInterface`.
   }
   ```
 
@@ -244,7 +246,8 @@ import { ProductModule } from './product/product.module';
   imports: [
     CacheModule,
     TypeOrmModule.forFeature([CronConfig, CronJob]),
-    // Be mindful of circular dependencies for modules which import the CronMangerModule
+    // Be mindful of circular dependencies for modules
+    // which import the CronMangerModule
     forwardRef(() => ProductModule),
   ],
   providers: [
@@ -303,7 +306,7 @@ Depending on the specified `jobType` when creating your cronConfig, there are di
 
 #### 1. `inline`:
 
-Simply pass the `cronConfig` name and a callback function as first and second arguments respectively to the `handleJob` method of the `CronManager` class. The callback function will be executed at the specified cron interval. Ensure to pass the cronConfig name as the first argument to the `handleJob` method.
+Simply pass the `cronConfig` name and a callback function as first and second arguments respectively to the `handleJob` method of the `CronManager` class. The callback function will be executed at the specified cron interval.
 
 ```sh
 curl -X 'POST' \
@@ -328,7 +331,7 @@ In this example, we are passing a `distributed` flag to indicate that the job sh
 
 We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
 
-Asides from the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler.
+Asides the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler.
 
 NB: The context field must be a valid JSON string.
 
@@ -379,7 +382,8 @@ export class SomeService {
 
 #### 2. `query`:
 
-The `nest-cron-manager` will execute an sql query (must be valid) if you create a `CronConfig` with the jobType is set to `query`, and a valid cronExpression specified. The query will be encrypted at rest using the `querySecret` from the `configService`. During runtime, the same `querySecret` will be used to decrypt the query.
+The `nest-cron-manager` will execute a valid sql query if you create a `CronConfig` with the jobType set to `query`, and a valid cronExpression specified. The query will be encrypted at rest using the `querySecret` from the `configService`. During runtime, the same `querySecret` will be used to decrypt the query for execution.
+
 
 ```sh
 curl -X 'POST' \
@@ -396,7 +400,7 @@ curl -X 'POST' \
 
 #### 3. `method`:
 
-The `nest-cron-manager` will execute methods defined on your `CronJobService` class if you create a `CronConfig` with the jobType is set to `method`, and a valid cronExpression is provided. The `nest-cron-manager` identifies the method to execute by matching the `CronConfig` name with the method name so ensure they match.
+The `nest-cron-manager` will execute methods defined on your `CronJobService` class if you create a `CronConfig` with the jobType set to `method`, and a valid cronExpression provided. The `nest-cron-manager` identifies the method to execute by matching the `CronConfig` name with the method name so ensure they match.
 
 ```sh
 curl -X 'POST' \

@@ -1,7 +1,7 @@
 {
   "name": "nest-cron-manager",
   "description": "Powerful, flexible and simple way to manage cron jobs in NestJS",
-  "version": "1.2.4",
+  "version": "1.3.1",
   "main": "dist/index.js",
   "types": "types/index.d.ts",
   "files": [
@@ -24,20 +24,14 @@
     "build": "npm run clean && tsc",
     "prepublishOnly": "npm run build",
     "clean": "rm -rf dist",
-    "release": "semantic-release",
-    "release:debug": "semantic-release --debug --no-ci",
     "commit": "git-cz"
   },
   "devDependencies": {
     "@nestjs/common": "^10.3.10",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/npm": "^12.0.1",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^22.2.0",
     "commitizen": "^4.3.0",
     "cz-conventional-changelog": "^3.3.0",
-    "semantic-release": "^24.0.0",
     "typescript": "^5.5.4"
   },
   "dependencies": {
