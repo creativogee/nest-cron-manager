@@ -3,20 +3,30 @@ import { CronJob as Job } from 'cron';
 import crypto from 'crypto-js';
 import {
   CreateCronConfig,
+  CreateCronManagerControl,
   CronConfig,
   CronJob,
+  CronManagerControl,
   CronManagerDeps,
   CronManager as CronManagerInterface,
   DatabaseOps,
   EndJob,
+  Frame,
   JobExecution,
   Lens as LensInterface,
   UpdateCronConfig,
+  UpdateCronManagerControl,
 } from '../types';
-import { Lens, validateDeps } from './helper';
+import { isJSON, validateDeps } from './helper';
+
+const CMC_WATCH = 'cmc';
+// every 3 seconds
+const CMC_WATCH_TIME = '*/2 * * * * *';
+const out_cmc = (cronConfig: CronConfig) => cronConfig.name !== CMC_WATCH;
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
   private logger: any;
+  private cronManagerControlRepository: any;
   private configService: any;
   private cronConfigRepository: any;
   private cronJobRepository: any;
@@ -42,8 +52,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     redisService,
     cronJobService,
     entityManager,
+    cronManagerControlRepository,
   }: CronManagerDeps) {
     this.logger = logger;
+    this.cronManagerControlRepository = cronManagerControlRepository;
     this.configService = configService;
     this.ormType = ormType;
     this.cronConfigRepository = cronConfigRepository;
@@ -55,6 +67,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
   onModuleInit() {
     const deps = validateDeps({
+      cronManagerControlRepository: this.cronManagerControlRepository,
       cronConfigRepository: this.cronConfigRepository,
       cronJobRepository: this.cronJobRepository,
       ormType: this.ormType,
@@ -74,6 +87,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       {
         name: 'logger',
         status: this.logger ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'cronManagerControlRepository',
+        status: this.cronManagerControlRepository ? 'OK' : 'Not Found',
       },
       {
         name: 'configService',
@@ -103,11 +120,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         name: 'entityManager',
         status: this.entityManager ? 'OK' : 'Not Found',
       },
-      {
-        name: 'cronJobs',
-        status: 'OK',
-        total: this.cronJobs.size,
-      },
     ];
 
     return statuses;
@@ -118,22 +130,35 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       data.query = this.encryptQuery(data.query);
     }
 
+    if (data.name === CMC_WATCH) {
+      data.enabled = true;
+    }
+
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
 
     if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
-      this.resetJobs();
+      const control = await this.databaseOps.getControl();
+
+      await this.expireJobs(control);
     }
 
     return { cronConfig };
   }
 
   async updateCronConfig(data: UpdateCronConfig) {
-    const found = await this.databaseOps.findOneCronConfig({
-      where: { id: data.id },
-    });
+    const [control, found] = await Promise.all([
+      this.databaseOps.getControl(),
+      this.databaseOps.findOneCronConfig({
+        where: { id: data.id },
+      }),
+    ]);
 
     if (!found) {
       throw new Error('CronConfig not found');
+    }
+
+    if (found.name === CMC_WATCH) {
+      throw new Error('Cannot update CMC watch');
     }
 
     if (data.query) {
@@ -145,20 +170,29 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
 
     if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
-      this.resetJobs();
+      await this.expireJobs(control);
     }
 
     return { cronConfig };
   }
 
   async listCronConfig(): Promise<CronConfig[]> {
-    return this.databaseOps.findCronConfig();
+    const cronConfigs = await this.databaseOps.findCronConfig();
+
+    return cronConfigs.filter(out_cmc);
   }
 
   async toggleCronConfig(id: number) {
-    const cronConfig = await this.databaseOps.findOneCronConfig({
-      where: { id },
-    });
+    const [control, cronConfig] = await Promise.all([
+      this.databaseOps.getControl(),
+      this.databaseOps.findOneCronConfig({
+        where: { id },
+      }),
+    ]);
+
+    if (cronConfig.name === CMC_WATCH) {
+      throw new Error('Cannot disable CMC watch');
+    }
 
     if (!cronConfig) {
       throw new Error('CronConfig not found');
@@ -168,13 +202,16 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     await this.databaseOps.saveCronConfig(cronConfig);
 
-    this.resetJobs();
+    await this.expireJobs(control);
 
     return { cronConfig };
   }
 
   async enableAllCronConfig() {
-    const cronConfigs = await this.databaseOps.findCronConfig();
+    const [control, cronConfigs] = await Promise.all([
+      this.databaseOps.getControl(),
+      this.databaseOps.findCronConfig(),
+    ]);
 
     await Promise.all(
       cronConfigs.map(async (cronConfig: CronConfig) => {
@@ -185,26 +222,33 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }),
     );
 
-    await this.resetJobs();
+    await this.expireJobs(control);
 
-    return { cronConfigs };
+    return {
+      cronConfigs: cronConfigs.filter(out_cmc),
+    };
   }
 
   async disableAllCronConfig() {
-    const cronConfigs = await this.databaseOps.findCronConfig();
+    const [control, cronConfigs] = await Promise.all([
+      this.databaseOps.getControl(),
+      this.databaseOps.findCronConfig(),
+    ]);
 
     await Promise.all(
       cronConfigs.map(async (cronConfig: CronConfig) => {
-        if (cronConfig.enabled) {
+        if (cronConfig.enabled && cronConfig.name !== CMC_WATCH) {
           cronConfig.enabled = false;
           await this.databaseOps.saveCronConfig(cronConfig);
         }
       }),
     );
 
-    await this.resetJobs();
+    await this.expireJobs(control);
 
-    return { cronConfigs };
+    return {
+      cronConfigs: cronConfigs.filter(out_cmc),
+    };
   }
 
   /**
@@ -220,7 +264,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
 
     let status: EndJob['status'];
-    let result: string;
+    let result: any;
 
     const redis = this.redisService.getClient();
     const lockKey = `cron-lock-${name}`;
@@ -267,7 +311,17 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         result = await execution(context, config, lens);
 
         if (result && job.config.jobType === CronManager.JobType.METHOD) {
-          result = JSON.stringify(result);
+          switch (true) {
+            case result instanceof Lens:
+              result = result.getFrames();
+              break;
+            case isJSON(result):
+              result = result;
+              break;
+            default:
+              result = JSON.stringify(result);
+              break;
+          }
         }
 
         if (!result && !lens.isEmpty) {
@@ -311,10 +365,61 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
   }
 
+  async createCronManagerControl(data: CreateCronManagerControl) {
+    const control = await this.databaseOps.getControl();
+
+    if (control) {
+      throw new Error('CronManager - Control already exists');
+    }
+
+    return this.databaseOps.createControl(data);
+  }
+
+  async getCronManagerControl(): Promise<CronManagerControl | null> {
+    return this.databaseOps.getControl();
+  }
+
+  async updateCronManagerControl(data: UpdateCronManagerControl) {
+    return this.databaseOps.updateControl(data);
+  }
+
   private async initializeJobs() {
-    const cronConfigs = await this.databaseOps.findCronConfig();
-    await Promise.all(cronConfigs.map((cronConfig: CronConfig) => this.scheduleJob(cronConfig)));
-    this.logger.log('Total jobs scheduled: ' + this.cronJobs.size);
+    const cronManagerEnabled = this.configService.get('app.cronManager.enabled');
+
+    if (!cronManagerEnabled) {
+      return;
+    }
+
+    const [control, cronConfigs] = await Promise.all([
+      this.databaseOps.getControl(),
+      this.databaseOps.findCronConfig(),
+    ]);
+
+    const cmc = cronConfigs.find((cronConfig: CronConfig) => cronConfig.name === CMC_WATCH);
+
+    if (!control && !!this.cronConfigRepository) {
+      await this.databaseOps.createControl({ enabled: true });
+    }
+
+    if (!cmc) {
+      const { cronConfig } = await this.createCronConfig({
+        name: CMC_WATCH,
+        enabled: true,
+        jobType: CronManager.JobType.QUERY,
+        dryRun: true,
+        cronExpression: CMC_WATCH_TIME,
+      });
+
+      cronConfigs.unshift(cronConfig);
+    }
+
+    await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
+
+    const updatedCronConfigs = await this.databaseOps.findCronConfig();
+
+    const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
+
+    this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
   }
 
   private async scheduleJob(cronConfig: CronConfig) {
@@ -322,7 +427,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       cronConfig.enabled &&
       !cronConfig.deletedAt &&
       cronConfig.cronExpression &&
-      [CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(cronConfig.jobType)
+      [CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(cronConfig.jobType) &&
+      !(
+        cronConfig.name !== CMC_WATCH &&
+        cronConfig.jobType === CronManager.JobType.QUERY &&
+        !cronConfig.query
+      )
     ) {
       const job = new Job(cronConfig.cronExpression, () => {
         this.executeJob(cronConfig);
@@ -330,12 +440,25 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       job.start();
       this.cronJobs.set(cronConfig.name, job);
-      this.logger.log(`Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`);
+
+      if (cronConfig.name !== CMC_WATCH) {
+        this.logger.log(`Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`);
+      }
     }
   }
 
   private async executeJob(cronConfig: CronConfig) {
     let execution: JobExecution;
+
+    const control = await this.databaseOps.getControl();
+
+    if (control?.reset) {
+      await this.resetJobs(control);
+    }
+
+    if (cronConfig.name === CMC_WATCH) {
+      return;
+    }
 
     if (cronConfig.jobType === CronManager.JobType.QUERY) {
       if (!cronConfig.query) {
@@ -360,7 +483,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     await this.handleJob(cronConfig.name, execution);
   }
 
-  private async resetJobs() {
+  private async resetJobs(control: CronManagerControl) {
+    const cronManagerEnabled = this.configService.get('app.cronManager.enabled');
+
+    if (!cronManagerEnabled) {
+      return;
+    }
+
     const cronConfigs = await this.databaseOps.findCronConfig();
 
     this.cronJobs.forEach((job, name) => {
@@ -368,8 +497,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       this.cronJobs.delete(name);
     });
 
-    await Promise.all(cronConfigs.map((cronConfig: CronConfig) => this.scheduleJob(cronConfig)));
-    this.logger.log('Total jobs scheduled: ' + this.cronJobs.size);
+    await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
+
+    control.reset = false;
+    await this.databaseOps.updateControl(control);
+
+    const updatedCronConfigs = await this.databaseOps.findCronConfig();
+    const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
+
+    this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
   }
 
   private async startJob(name: string) {
@@ -403,6 +539,17 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     await this.databaseOps.saveCronJob(job);
   }
 
+  private async expireJobs(control: CronManagerControl) {
+    if (!control) {
+      this.resetJobs(control);
+    }
+
+    if (control) {
+      control.reset = true;
+      this.databaseOps.updateControl(control);
+    }
+  }
+
   private encryptQuery(text: string): string {
     const secretKey = this.configService.get('app.cronManager.querySecret');
 
@@ -422,6 +569,39 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const bytes = crypto.AES.decrypt(text, secretKey);
     return bytes.toString(crypto.enc.Utf8);
+  }
+
+  private getTotalEnabledJobs(cronConfigs: CronConfig[]): number {
+    return cronConfigs.filter((cronConfig: CronConfig) => {
+      switch (true) {
+        case cronConfig.name === CMC_WATCH:
+          return true;
+        case cronConfig.jobType === CronManager.JobType.QUERY:
+          return cronConfig.enabled && cronConfig.cronExpression && cronConfig.query;
+        case cronConfig.jobType === CronManager.JobType.METHOD:
+          return cronConfig.enabled && cronConfig.cronExpression;
+        case cronConfig.jobType === CronManager.JobType.INLINE:
+          return cronConfig.enabled;
+        default:
+          return false;
+      }
+    }).length;
+  }
+}
+
+export class Lens {
+  private frames: Frame[] = [];
+
+  get isEmpty() {
+    return this.frames.length === 0;
+  }
+
+  capture(action: Frame) {
+    this.frames.push(action);
+  }
+
+  getFrames() {
+    return JSON.stringify(this.frames);
   }
 }
 

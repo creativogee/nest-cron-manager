@@ -11,7 +11,10 @@ export class CronManager {
 
   static JobType: Record<string, string>;
 
-  checkInit(): { name: string; status?: string; total?: number }[];
+  checkInit(): { name: string; status: string }[];
+  createCronManagerControl(data: CreateCronManagerControl): Promise<CronManagerControl>;
+  getCronManagerControl(): Promise<CronManagerControl | null>;
+  updateCronManagerControl(data: UpdateCronManagerControl): Promise<CronManagerControl>;
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
   listCronConfig(): Promise<CronConfig[]>;
@@ -57,6 +60,13 @@ export type JobExecution = (
   lens?: Lens,
 ) => Promise<any>;
 
+export interface CronManagerControl {
+  id: number;
+  reset: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface CronConfig {
   id: number;
   name: string;
@@ -81,6 +91,7 @@ export interface CronJob {
 
 export interface CronManagerDeps {
   logger: any;
+  cronManagerControlRepository?: any;
   configService: any;
   cronConfigRepository: any;
   cronJobRepository: any;
@@ -88,6 +99,17 @@ export interface CronManagerDeps {
   ormType: 'typeorm' | 'mongoose';
   cronJobService?: any;
   entityManager?: any; // for typeorm only
+}
+
+export interface CreateCronManagerControl {
+  enabled?: boolean;
+  reset?: boolean;
+}
+
+export interface UpdateCronManagerControl {
+  id: number;
+  enabled?: boolean;
+  reset?: boolean;
 }
 
 export interface CreateCronConfig {
@@ -131,9 +153,13 @@ interface DatabaseOps {
   saveCronJob(data: any): Promise<any>;
   query(sql: string): Promise<any>;
   isTypeOrm(): boolean;
+  createControl(data: CreateCronManagerControl): Promise<CronManagerControl>;
+  getControl(): Promise<CronManagerControl | null>;
+  updateControl(data: UpdateCronManagerControl): Promise<CronManagerControl>;
 }
 
 interface TypeormOperationsDeps {
+  cronManagerControlRepository?: any;
   cronConfigRepository: any;
   cronJobRepository: any;
   configService: any;
@@ -141,6 +167,7 @@ interface TypeormOperationsDeps {
 }
 
 interface MongooseOperationsDeps {
+  cronManagerControlModel: any;
   cronConfigModel: any;
   cronJobModel: any;
 }

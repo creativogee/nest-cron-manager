@@ -1,14 +1,15 @@
 import {
   CreateCronConfig,
   CronConfig,
+  CronManagerControl,
   CronManagerDeps,
   DatabaseOps,
-  Frame,
   MongooseOperationsDeps,
   TypeormOperationsDeps,
 } from '../types';
 
 export class TypeOrmOperations implements DatabaseOps {
+  private cronManagerControlRepository: any;
   private cronConfigRepository: any;
   private cronJobRepository: any;
   private configService: any;
@@ -19,11 +20,44 @@ export class TypeOrmOperations implements DatabaseOps {
     cronJobRepository,
     configService,
     entityManager,
+    cronManagerControlRepository,
   }: TypeormOperationsDeps) {
+    this.cronManagerControlRepository = cronManagerControlRepository;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.configService = configService;
     this.entityManager = entityManager;
+  }
+
+  async createControl(data: CronManagerControl): Promise<CronManagerControl> {
+    if (!this.cronManagerControlRepository) {
+      throw new Error('CronManager - Control repository not found');
+    }
+    return this.cronManagerControlRepository.save(data);
+  }
+
+  async getControl(): Promise<CronManagerControl | null> {
+    if (!this.cronManagerControlRepository) {
+      throw new Error('CronManager - Control repository not found');
+    }
+
+    return this.cronManagerControlRepository
+      .find({
+        order: {
+          createdAt: 'DESC',
+        },
+      })
+      .then((controls: CronManagerControl[]) => {
+        return controls.length ? controls[0] : null;
+      });
+  }
+
+  async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
+    if (!this.cronManagerControlRepository) {
+      throw new Error('CronManager - Control repository not found');
+    }
+
+    return this.cronManagerControlRepository.save(data);
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -67,12 +101,37 @@ export class TypeOrmOperations implements DatabaseOps {
 }
 
 export class MongooseOperations implements DatabaseOps {
+  private cronManagerControlModel: any;
   private cronConfigModel: any;
   private cronJobModel: any;
 
-  constructor({ cronConfigModel, cronJobModel }: MongooseOperationsDeps) {
+  constructor({ cronConfigModel, cronJobModel, cronManagerControlModel }: MongooseOperationsDeps) {
+    this.cronManagerControlModel = cronManagerControlModel;
     this.cronConfigModel = cronConfigModel;
     this.cronJobModel = cronJobModel;
+  }
+
+  async createControl(data: CronManagerControl): Promise<CronManagerControl> {
+    if (!this.cronManagerControlModel) {
+      throw new Error('CronManager - Control model not found');
+    }
+
+    return this.cronManagerControlModel.create(data);
+  }
+
+  async getControl(): Promise<CronManagerControl | null> {
+    if (!this.cronManagerControlModel) {
+      throw new Error('CronManager - Control model not found');
+    }
+
+    return this.cronManagerControlModel.findOne();
+  }
+
+  async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
+    if (!this.cronManagerControlModel) {
+      throw new Error('CronManager - Control model not found');
+    }
+    return this.cronManagerControlModel.findOneAndUpdate({}, data, { upsert: true, new: true });
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -109,6 +168,7 @@ export class MongooseOperations implements DatabaseOps {
 }
 
 export const validateDeps = ({
+  cronManagerControlRepository,
   cronConfigRepository,
   cronJobRepository,
   configService,
@@ -150,6 +210,7 @@ export const validateDeps = ({
     }
 
     databaseOps = new TypeOrmOperations({
+      cronManagerControlRepository,
       cronConfigRepository,
       cronJobRepository,
       configService,
@@ -163,6 +224,7 @@ export const validateDeps = ({
     }
 
     databaseOps = new MongooseOperations({
+      cronManagerControlModel: cronConfigRepository,
       cronConfigModel: cronConfigRepository,
       cronJobModel: cronJobRepository,
     });
@@ -175,18 +237,11 @@ export const validateDeps = ({
   return { databaseOps };
 };
 
-export class Lens {
-  private frames: Frame[] = [];
-
-  get isEmpty() {
-    return this.frames.length === 0;
+export const isJSON = (str: string): boolean => {
+  try {
+    JSON.parse(str);
+    return true;
+  } catch (e) {
+    return false;
   }
-
-  capture(action: Frame) {
-    this.frames.push(action);
-  }
-
-  getFrames() {
-    return JSON.stringify(this.frames);
-  }
-}
+};
