@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   CreateCronConfig,
   CronConfig,
@@ -14,6 +15,7 @@ export class TypeOrmOperations implements DatabaseOps {
   private cronJobRepository: any;
   private configService: any;
   private entityManager: any;
+  private querySecret: string;
 
   constructor({
     cronConfigRepository,
@@ -21,19 +23,21 @@ export class TypeOrmOperations implements DatabaseOps {
     configService,
     entityManager,
     cronManagerControlRepository,
+    querySecret,
   }: TypeormOperationsDeps) {
     this.cronManagerControlRepository = cronManagerControlRepository;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.configService = configService;
     this.entityManager = entityManager;
+    this.querySecret = querySecret;
   }
 
-  async createControl(data: CronManagerControl): Promise<CronManagerControl> {
+  async createControl(): Promise<CronManagerControl> {
     if (!this.cronManagerControlRepository) {
       throw new Error('CronManager - Control repository not found');
     }
-    return this.cronManagerControlRepository.save(data);
+    return this.cronManagerControlRepository.save({ cmcv: randomUUID() });
   }
 
   async getControl(): Promise<CronManagerControl | null> {
@@ -57,7 +61,9 @@ export class TypeOrmOperations implements DatabaseOps {
       throw new Error('CronManager - Control repository not found');
     }
 
-    return this.cronManagerControlRepository.save(data);
+    return this.cronManagerControlRepository
+      .update({ cmcv: data.cmcv }, { ...data, cmcv: randomUUID() })
+      .then(() => this.cronManagerControlRepository.findOne({ where: { cmcv: data.id } }));
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -73,8 +79,7 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async saveCronConfig(data: CronConfig): Promise<CronConfig> {
-    const querySecret = this.configService.get('app.cronManager.querySecret');
-
+    const querySecret = this.configService?.get('app.cronManager.querySecret') ?? this.querySecret;
     if (data.jobType === 'query') {
       if (!querySecret) {
         throw new Error('CronManager - Query secret not found');
@@ -111,12 +116,11 @@ export class MongooseOperations implements DatabaseOps {
     this.cronJobModel = cronJobModel;
   }
 
-  async createControl(data: CronManagerControl): Promise<CronManagerControl> {
+  async createControl(): Promise<CronManagerControl> {
     if (!this.cronManagerControlModel) {
       throw new Error('CronManager - Control model not found');
     }
-
-    return this.cronManagerControlModel.create(data);
+    return this.cronManagerControlModel.create({ cmcv: randomUUID() });
   }
 
   async getControl(): Promise<CronManagerControl | null> {
@@ -131,7 +135,12 @@ export class MongooseOperations implements DatabaseOps {
     if (!this.cronManagerControlModel) {
       throw new Error('CronManager - Control model not found');
     }
-    return this.cronManagerControlModel.findOneAndUpdate({}, data, { upsert: true, new: true });
+
+    return this.cronManagerControlModel.findOneAndUpdate(
+      { cmcv: data.cmcv },
+      { ...data, cmcv: randomUUID() },
+      { new: true },
+    );
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -176,6 +185,7 @@ export const validateDeps = ({
   logger,
   redisService,
   entityManager,
+  querySecret,
 }: CronManagerDeps) => {
   if (['typeorm', 'mongoose'].indexOf(ormType) === -1) {
     throw new Error('CronManager - Invalid ORM type');
@@ -187,10 +197,6 @@ export const validateDeps = ({
 
   if (!redisService) {
     throw new Error('CronManager - Redis service not provided');
-  }
-
-  if (!configService) {
-    throw new Error('CronManager - Config service not provided');
   }
 
   if (!cronConfigRepository || !cronJobRepository) {
@@ -215,6 +221,7 @@ export const validateDeps = ({
       cronJobRepository,
       configService,
       entityManager,
+      querySecret,
     });
   }
 

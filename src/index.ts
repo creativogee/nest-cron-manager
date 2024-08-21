@@ -3,7 +3,6 @@ import { CronJob as Job } from 'cron';
 import crypto from 'crypto-js';
 import {
   CreateCronConfig,
-  CreateCronManagerControl,
   CronConfig,
   CronJob,
   CronManagerControl,
@@ -15,13 +14,10 @@ import {
   JobExecution,
   Lens as LensInterface,
   UpdateCronConfig,
-  UpdateCronManagerControl,
 } from '../types';
 import { isJSON, validateDeps } from './helper';
 
 const CMC_WATCH = 'cmc';
-// every 3 seconds
-const CMC_WATCH_TIME = '*/2 * * * * *';
 const out_cmc = (cronConfig: CronConfig) => cronConfig.name !== CMC_WATCH;
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
@@ -32,6 +28,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private cronJobRepository: any;
   private redisService: any;
   private ormType: 'typeorm' | 'mongoose';
+  private appCount: number;
+  private watchTime: string = '*/2 * * * * *';
+  private enabled: boolean;
+  private querySecret: string;
   private entityManager: any;
   private cronJobService: any;
   private databaseOps: DatabaseOps;
@@ -45,7 +45,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
   constructor({
     logger,
-    configService,
+    enabled,
+    watchTime,
+    appCount,
+    querySecret,
     ormType,
     cronConfigRepository,
     cronJobRepository,
@@ -56,13 +59,16 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }: CronManagerDeps) {
     this.logger = logger;
     this.cronManagerControlRepository = cronManagerControlRepository;
-    this.configService = configService;
     this.ormType = ormType;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.redisService = redisService;
     this.entityManager = entityManager;
     this.cronJobService = cronJobService;
+    this.enabled = enabled;
+    this.watchTime = watchTime;
+    this.appCount = appCount;
+    this.querySecret = querySecret;
   }
 
   onModuleInit() {
@@ -75,6 +81,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       logger: this.logger,
       redisService: this.redisService,
       entityManager: this.entityManager,
+      querySecret: this.querySecret,
     });
 
     this.databaseOps = deps.databaseOps;
@@ -119,6 +126,22 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       {
         name: 'entityManager',
         status: this.entityManager ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'enabled',
+        status: this.enabled ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'appCount',
+        status: this.appCount ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'watchTime',
+        status: this.watchTime ? 'OK' : 'Not Found',
+      },
+      {
+        name: 'querySecret',
+        status: this.querySecret ? 'OK' : 'Not Found',
       },
     ];
 
@@ -169,7 +192,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
 
-    if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
+    const jobType = data?.jobType ?? cronConfig.jobType;
+
+    if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(jobType)) {
       await this.expireJobs(control);
     }
 
@@ -257,9 +282,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
    * @warning Failure to match these names WILL result in unexpected behavior
    */
   async handleJob(name: string, execution: JobExecution) {
-    const config = this.configService.get('app');
-
-    if (!config?.cronManager?.enabled) {
+    const config = this.configService?.get('app');
+    const isEnabled = config?.cronManager?.enabled ?? this.enabled;
+    if (!isEnabled) {
       return;
     }
 
@@ -365,28 +390,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
   }
 
-  async createCronManagerControl(data: CreateCronManagerControl) {
-    const control = await this.databaseOps.getControl();
-
-    if (control) {
-      throw new Error('CronManager - Control already exists');
-    }
-
-    return this.databaseOps.createControl(data);
-  }
-
-  async getCronManagerControl(): Promise<CronManagerControl | null> {
-    return this.databaseOps.getControl();
-  }
-
-  async updateCronManagerControl(data: UpdateCronManagerControl) {
-    return this.databaseOps.updateControl(data);
-  }
-
   private async initializeJobs() {
-    const cronManagerEnabled = this.configService.get('app.cronManager.enabled');
+    const isEnabled = this.configService?.get('app.cronManager.enabled') ?? this.enabled;
 
-    if (!cronManagerEnabled) {
+    if (!isEnabled) {
       return;
     }
 
@@ -397,8 +404,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     const cmc = cronConfigs.find((cronConfig: CronConfig) => cronConfig.name === CMC_WATCH);
 
-    if (!control && !!this.cronConfigRepository) {
-      await this.databaseOps.createControl({ enabled: true });
+    if (!control && !!this.cronManagerControlRepository) {
+      await this.databaseOps.createControl();
     }
 
     if (!cmc) {
@@ -407,7 +414,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         enabled: true,
         jobType: CronManager.JobType.QUERY,
         dryRun: true,
-        cronExpression: CMC_WATCH_TIME,
+        cronExpression: this.watchTime,
       });
 
       cronConfigs.unshift(cronConfig);
@@ -484,9 +491,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async resetJobs(control: CronManagerControl) {
-    const cronManagerEnabled = this.configService.get('app.cronManager.enabled');
-
-    if (!cronManagerEnabled) {
+    const isEnabled = this.configService?.get('app.cronManager.enabled') ?? this.enabled;
+    if (!isEnabled) {
       return;
     }
 
@@ -500,7 +506,20 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
 
     control.reset = false;
-    await this.databaseOps.updateControl(control);
+    if (control.resetCount > 0) {
+      control.resetCount -= 1;
+    }
+
+    let latestVersion = control.cmcv;
+
+    try {
+      await this.databaseOps.updateControl(control);
+    } catch (error) {
+      const latestControl = await this.databaseOps.getControl();
+      latestVersion = latestControl.cmcv;
+      control.cmcv = latestVersion;
+      await this.databaseOps.updateControl(control);
+    }
 
     const updatedCronConfigs = await this.databaseOps.findCronConfig();
     const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
@@ -546,28 +565,37 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     if (control) {
       control.reset = true;
-      this.databaseOps.updateControl(control);
+      control.resetCount = this.appCount;
+
+      let latestVersion = control.cmcv;
+
+      try {
+        this.databaseOps.updateControl(control);
+      } catch (error) {
+        const latestControl = await this.databaseOps.getControl();
+        latestVersion = latestControl.cmcv;
+        control.cmcv = latestVersion;
+        this.databaseOps.updateControl(control);
+      }
     }
   }
 
   private encryptQuery(text: string): string {
-    const secretKey = this.configService.get('app.cronManager.querySecret');
-
-    if (!secretKey) {
+    const querySecret = this.configService?.get('app.cronManager.querySecret') ?? this.querySecret;
+    if (!querySecret) {
       throw new Error('Query secret not found');
     }
 
-    return crypto.AES.encrypt(text, secretKey).toString();
+    return crypto.AES.encrypt(text, querySecret).toString();
   }
 
   private decryptQuery(text: string): string {
-    const secretKey = this.configService.get('app.cronManager.querySecret');
-
-    if (!secretKey) {
+    const querySecret = this.configService?.get('app.cronManager.querySecret') ?? this.querySecret;
+    if (!querySecret) {
       throw new Error('Query secret not found');
     }
 
-    const bytes = crypto.AES.decrypt(text, secretKey);
+    const bytes = crypto.AES.decrypt(text, querySecret);
     return bytes.toString(crypto.enc.Utf8);
   }
 

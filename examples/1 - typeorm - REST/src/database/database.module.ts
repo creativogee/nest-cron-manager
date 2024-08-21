@@ -6,8 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
   imports: [
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) =>
-        configService.get('typeorm'),
+      useFactory: async (configService: ConfigService) => configService?.get('typeorm'),
     }),
   ],
 })

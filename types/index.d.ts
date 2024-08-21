@@ -1,7 +1,6 @@
 export class CronManager {
   constructor({
     logger,
-    configService,
     cronConfigRepository,
     cronJobRepository,
     redisService,
@@ -12,9 +11,6 @@ export class CronManager {
   static JobType: Record<string, string>;
 
   checkInit(): { name: string; status: string }[];
-  createCronManagerControl(data: CreateCronManagerControl): Promise<CronManagerControl>;
-  getCronManagerControl(): Promise<CronManagerControl | null>;
-  updateCronManagerControl(data: UpdateCronManagerControl): Promise<CronManagerControl>;
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
   listCronConfig(): Promise<CronConfig[]>;
@@ -63,8 +59,10 @@ export type JobExecution = (
 export interface CronManagerControl {
   id: number;
   reset: boolean;
+  resetCount: number;
   createdAt: Date;
   updatedAt: Date;
+  cmcv: string;
 }
 
 export interface CronConfig {
@@ -92,24 +90,30 @@ export interface CronJob {
 export interface CronManagerDeps {
   logger: any;
   cronManagerControlRepository?: any;
-  configService: any;
+  configService?: any;
   cronConfigRepository: any;
   cronJobRepository: any;
   redisService: any;
   ormType: 'typeorm' | 'mongoose';
   cronJobService?: any;
   entityManager?: any; // for typeorm only
+  enabled?: boolean;
+  appCount?: number; // default 1
+  watchTime?: string; // '* * * * * *'
+  querySecret?: string;
 }
 
 export interface CreateCronManagerControl {
-  enabled?: boolean;
   reset?: boolean;
+  resetCount?: number;
+  cmcv?: string;
 }
 
 export interface UpdateCronManagerControl {
   id: number;
-  enabled?: boolean;
   reset?: boolean;
+  resetCount?: number;
+  cmcv?: string;
 }
 
 export interface CreateCronConfig {
@@ -153,7 +157,7 @@ interface DatabaseOps {
   saveCronJob(data: any): Promise<any>;
   query(sql: string): Promise<any>;
   isTypeOrm(): boolean;
-  createControl(data: CreateCronManagerControl): Promise<CronManagerControl>;
+  createControl(): Promise<CronManagerControl>;
   getControl(): Promise<CronManagerControl | null>;
   updateControl(data: UpdateCronManagerControl): Promise<CronManagerControl>;
 }
@@ -162,8 +166,9 @@ interface TypeormOperationsDeps {
   cronManagerControlRepository?: any;
   cronConfigRepository: any;
   cronJobRepository: any;
-  configService: any;
   entityManager: any;
+  querySecret?: string;
+  configService: any;
 }
 
 interface MongooseOperationsDeps {
