@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import {
   CreateCronConfig,
   CronConfig,
+  CronJob,
   CronManagerControl,
   CronManagerDeps,
   DatabaseOps,
@@ -67,11 +68,15 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
-    return this.cronConfigRepository.findOne(options);
+    return this.cronConfigRepository.findOne({
+      where: options,
+    });
   }
 
   async findCronConfig(options?: any): Promise<CronConfig[]> {
-    return this.cronConfigRepository.find(options);
+    return this.cronConfigRepository.find({
+      where: options,
+    });
   }
 
   createCronConfig(data: CreateCronConfig): CronConfig {
@@ -144,27 +149,59 @@ export class MongooseOperations implements DatabaseOps {
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
+    if (options?.id) {
+      options._id = options.id;
+      delete options.id;
+    }
+
     return this.cronConfigModel.findOne(options).exec();
   }
 
   async findCronConfig(options?: any): Promise<CronConfig[]> {
+    if (options?.id) {
+      options._id = options.id;
+      delete options.id;
+    }
+
     return this.cronConfigModel.find(options).exec();
   }
 
   createCronConfig(data: CreateCronConfig): CronConfig {
-    return new this.cronConfigModel(data);
+    return this.cronConfigModel.create(data);
   }
 
-  async saveCronConfig(data: any): Promise<CronConfig> {
-    return data.save();
+  async saveCronConfig({ id, ...data }: any): Promise<CronConfig> {
+    delete data.deletedAt;
+
+    const cronConfig = await this.cronConfigModel.findOne({ _id: id }).exec();
+
+    if (!cronConfig) {
+      return this.cronConfigModel.create(data);
+    }
+
+    Object.assign(cronConfig, data);
+
+    return cronConfig.save();
   }
 
-  createCronJob(data: any): any {
-    return new this.cronJobModel(data);
+  async createCronJob({ config, ...data }: any): Promise<CronJob> {
+    data.configId = config.id;
+
+    return this.cronJobModel.create(data);
   }
 
-  async saveCronJob(data: any): Promise<any> {
-    return data.save();
+  async saveCronJob({ id, ...data }: any): Promise<CronJob> {
+    delete data.deletedAt;
+
+    const cronJob = await this.cronJobModel.findOne({ _id: id }).exec();
+
+    if (!cronJob) {
+      return this.cronJobModel.create(data);
+    }
+
+    Object.assign(cronJob, data);
+
+    return cronJob.save();
   }
 
   async query(sql: string): Promise<any> {
@@ -231,7 +268,7 @@ export const validateDeps = ({
     }
 
     databaseOps = new MongooseOperations({
-      cronManagerControlModel: cronConfigRepository,
+      cronManagerControlModel: cronManagerControlRepository,
       cronConfigModel: cronConfigRepository,
       cronJobModel: cronJobRepository,
     });

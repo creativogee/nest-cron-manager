@@ -14,7 +14,7 @@ export class CronManager {
   createCronConfig(data: CreateCronConfig): Promise<{ cronConfig: any }>;
   updateCronConfig(data: UpdateCronConfig): Promise<{ cronConfig: any }>;
   listCronConfig(): Promise<CronConfig[]>;
-  toggleCronConfig(id: number): Promise<{ cronConfig: any }>;
+  toggleCronConfig(id: number | string): Promise<{ cronConfig: any }>;
   enableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
   disableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
 
@@ -57,16 +57,16 @@ export type JobExecution = (
 ) => Promise<any>;
 
 export interface CronManagerControl {
-  id: number;
+  id: number | string;
   reset: boolean;
   resetCount: number;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   cmcv: string;
 }
 
 export interface CronConfig {
-  id: number;
+  id: number | string;
   name: string;
   jobType: string; // 'inline' | 'method' | 'query';
   enabled: boolean;
@@ -79,7 +79,7 @@ export interface CronConfig {
 }
 
 export interface CronJob {
-  id: number;
+  id: number | string;
   config: CronConfig;
   result: any | null;
   startedAt: Date | null;
@@ -110,7 +110,7 @@ export interface CreateCronManagerControl {
 }
 
 export interface UpdateCronManagerControl {
-  id: number;
+  id: number | string;
   reset?: boolean;
   resetCount?: number;
   cmcv?: string;
@@ -127,7 +127,7 @@ export interface CreateCronConfig {
 }
 
 export interface UpdateCronConfig {
-  id: number;
+  id: number | string;
   name?: string;
   context?: any;
   cronExpression?: string;
@@ -153,7 +153,7 @@ interface DatabaseOps {
   findCronConfig(options?: any): Promise<CronConfig[]>;
   createCronConfig(data: CreateCronConfig): CronConfig;
   saveCronConfig(data: CreateCronConfig): Promise<CronConfig>;
-  createCronJob(data: any): CronJob;
+  createCronJob(data: any): Promise<CronJob>;
   saveCronJob(data: any): Promise<any>;
   query(sql: string): Promise<any>;
   isTypeOrm(): boolean;

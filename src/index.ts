@@ -168,12 +168,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     return { cronConfig };
   }
 
-  async updateCronConfig(data: UpdateCronConfig) {
+  async updateCronConfig({ id, ...update }: UpdateCronConfig) {
     const [control, found] = await Promise.all([
       this.databaseOps.getControl(),
-      this.databaseOps.findOneCronConfig({
-        where: { id: data.id },
-      }),
+      this.databaseOps.findOneCronConfig({ id }),
     ]);
 
     if (!found) {
@@ -184,15 +182,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       throw new Error('Cannot update CMC watch');
     }
 
-    if (data.query) {
-      data.query = this.encryptQuery(data.query);
+    if (update.query) {
+      update.query = this.encryptQuery(update.query);
     }
 
-    Object.assign(found, data);
+    Object.assign(found, update);
 
     const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
 
-    const jobType = data?.jobType ?? cronConfig.jobType;
+    const jobType = update?.jobType ?? cronConfig.jobType;
 
     if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(jobType)) {
       await this.expireJobs(control);
@@ -207,12 +205,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     return cronConfigs.filter(out_cmc);
   }
 
-  async toggleCronConfig(id: number) {
+  async toggleCronConfig(id: number | string) {
     const [control, cronConfig] = await Promise.all([
       this.databaseOps.getControl(),
-      this.databaseOps.findOneCronConfig({
-        where: { id },
-      }),
+      this.databaseOps.findOneCronConfig({ id }),
     ]);
 
     if (cronConfig.name === CMC_WATCH) {
@@ -528,9 +524,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async startJob(name: string) {
-    const cronConfig = await this.databaseOps.findOneCronConfig({
-      where: { name },
-    });
+    const cronConfig = await this.databaseOps.findOneCronConfig({ name });
 
     if (!cronConfig?.enabled || cronConfig?.deletedAt) {
       throw new Error();
@@ -539,13 +533,14 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     let cronJob: CronJob;
 
     if (!cronConfig.dryRun) {
-      cronJob = this.databaseOps.createCronJob({
+      cronJob = await this.databaseOps.createCronJob({
         config: cronConfig,
         startedAt: new Date(),
       });
     }
 
     const context = JSON.parse(cronConfig?.context || '{}');
+    cronJob.config = cronConfig;
 
     return { job: cronJob, context, dryRun: cronConfig?.dryRun };
   }
