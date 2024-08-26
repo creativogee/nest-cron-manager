@@ -23,6 +23,6 @@ export class UserService {
   }
 
   async getAll(): Promise<User[]> {
-    return this.userRepository.find();
+    return this.userRepository.find({});
   }
 }

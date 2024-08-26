@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CacheModule } from './cache/cache.module';
 import appConfig from './configs/app.config';
-import { CronConfigController } from './cron-manager/cron-config.controller';
+import { CronManagerController } from './cron-manager/cron-manager.controller';
 import { CronManagerModule } from './cron-manager/cron-manager.module';
 import { DatabaseModule } from './database/database.module';
 import typeormConfig from './database/typeorm';
@@ -22,6 +22,6 @@ import typeormConfig from './database/typeorm';
       expandVariables: true,
     }),
   ],
-  controllers: [CronConfigController],
+  controllers: [CronManagerController],
 })
 export class AppModule {}

@@ -30,7 +30,7 @@ export class CronConfig implements CronConfigInterface {
   query: string;
 
   @Column({ nullable: true, default: false })
-  dryRun: boolean;
+  silent: boolean;
 
   @Column({ nullable: true })
   deletedAt: Date;

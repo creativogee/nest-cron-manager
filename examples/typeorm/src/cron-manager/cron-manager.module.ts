@@ -11,49 +11,55 @@ import {
 } from '@nestjs/typeorm';
 import { CronManager } from 'nest-cron-manager';
 import { EntityManager, Repository } from 'typeorm';
-import { CronConfigController } from './cron-config.controller';
 import { CronConfig } from './cron-config.model';
 import { CronJob } from './cron-job.model';
 import { CronJobService } from './cron-job.service';
+import { CronManagerControl } from './cron-manager-control.model';
+import { CronManagerController } from './cron-manager.controller';
 
 @Module({
-  controllers: [CronConfigController],
+  controllers: [CronManagerController],
   imports: [
-    TypeOrmModule.forFeature([CronConfig, CronJob]),
-    forwardRef(() => PostModule),
+    TypeOrmModule.forFeature([CronConfig, CronJob, CronManagerControl]),
     CacheModule,
     UserModule,
+    forwardRef(() => PostModule),
   ],
   providers: [
     CronJobService,
     {
       provide: CronManager,
       useFactory: async (
+        entityManager: EntityManager,
+        cronManagerControlRepository: Repository<CronManagerControl>,
         cronConfigRepository: Repository<CronConfig>,
         cronJobRepository: Repository<CronJob>,
-        configService: ConfigService,
         redisService: CacheService,
         cronJobService: CronJobService,
-        entityManager: EntityManager,
+        configService: ConfigService,
       ) => {
         return new CronManager({
+          replicaId: configService.get('app.cronManager.replicaId'),
+          enabled: configService.get('app.cronManager.enabled'),
+          querySecret: configService.get('app.cronManager.querySecret'),
           logger: new Logger(CronManager.name),
-          configService,
+          entityManager,
+          cronManagerControlRepository,
           cronConfigRepository,
           cronJobRepository,
           redisService,
           cronJobService,
-          entityManager,
-          ormType: 'typeorm',
+          orm: 'typeorm',
         });
       },
       inject: [
+        getEntityManagerToken(),
+        getRepositoryToken(CronManagerControl),
         getRepositoryToken(CronConfig),
         getRepositoryToken(CronJob),
-        ConfigService,
         CacheService,
         CronJobService,
-        getEntityManagerToken(),
+        ConfigService,
       ],
     },
   ],

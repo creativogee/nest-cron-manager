@@ -6,15 +6,20 @@ import {
 } from 'nest-cron-manager';
 
 @Controller()
-export class CronConfigController {
+export class CronManagerController {
   constructor(private readonly cronManager: CronManager) {}
 
-  @Post('/cron-config')
+  @Post('cmc/purge')
+  purgeControl() {
+    return this.cronManager.purgeControl();
+  }
+
+  @Post('/cron/config')
   async createCronConfig(@Body() body: CreateCronConfig) {
     return this.cronManager.createCronConfig(body);
   }
 
-  @Put('/cron-config/:id')
+  @Put('/cron/config/:id')
   async updateCronConfig(
     @Body() body: UpdateCronConfig,
     @Param('id') id: string,
@@ -22,22 +27,22 @@ export class CronConfigController {
     return this.cronManager.updateCronConfig({ ...body, id: +id });
   }
 
-  @Get('/cron-config')
+  @Get('/cron/config')
   async listCronConfig() {
     return this.cronManager.listCronConfig();
   }
 
-  @Put('/cron-config/:id/toggle')
+  @Put('/cron/config/:id/toggle')
   async enableCronConfig(@Param('id') id: string) {
     return this.cronManager.toggleCronConfig(+id);
   }
 
-  @Put('/cron-config/all/enable')
+  @Put('/cron/config/all/enable')
   async enableAllCronConfig() {
     return this.cronManager.enableAllCronConfig();
   }
 
-  @Put('/cron-config/all/disable')
+  @Put('/cron/config/all/disable')
   async disableAllCronConfig() {
     return this.cronManager.disableAllCronConfig();
   }

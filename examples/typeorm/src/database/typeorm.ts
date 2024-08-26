@@ -13,7 +13,7 @@ const config = {
   database: `${process.env.PG_DATABASE}`,
   entities: ['dist/**/*.model{.ts,.js}'],
   migrations: ['dist/database/migrations/*{.ts,.js}'],
-  synchronize: false,
+  synchronize: true,
 } satisfies DataSourceOptions;
 
 export default registerAs('typeorm', () => config);

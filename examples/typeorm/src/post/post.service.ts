@@ -1,5 +1,5 @@
 import { UserService } from '@/user/user.service';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CronManager, Lens } from 'nest-cron-manager';
@@ -7,7 +7,7 @@ import { Repository } from 'typeorm';
 import { Post } from './post.model';
 
 @Injectable()
-export class PostService implements OnModuleInit {
+export class PostService {
   logger: Logger;
 
   constructor(
@@ -19,11 +19,6 @@ export class PostService implements OnModuleInit {
     this.logger = new Logger(PostService.name);
   }
 
-  onModuleInit() {
-    const state = this.cronManager.checkInit();
-    this.logger.log(`Cron manager state: ${JSON.stringify(state, null, 2)}`);
-  }
-
   /**
    * Called as inline jobType
    */
@@ -31,7 +26,7 @@ export class PostService implements OnModuleInit {
   async createPost() {
     await this.cronManager.handleJob(
       'createPost',
-      async (context: Record<string, any>, config: Record<string, any>, lens: Lens) => {
+      async (context: Record<string, any>, lens: Lens) => {
         const user = await this.userService.getUserById(1);
 
         if (!user) {
