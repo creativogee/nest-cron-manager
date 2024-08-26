@@ -20,208 +20,227 @@ To install, use:
 ```sh
 npm install nest-cron-manager
 
-# or
+# OR
 
 yarn add nest-cron-manager
 ```
 
 ## Getting Started
 
-Please see the [repository](https://github.com/creativogee/nest-cron-manager/tree/main/examples) for examples of how to use the library.
+#### For TypeORM:
 
-### Prerequisites
+```sh
+npm install ioredis typeorm @nestjs/schedule @nestjs/typeorm pg
+```
 
-Before using the `nest-cron-manager` library, ensure the following requirements are met:
+#### For Mongoose:
 
-- Install `ioredis`, `@nestjs/config`, `@nestjs/schedule`
-- Install `typeorm`, `@nestjs/typeorm`, `pg` or `@nestjs/mongoose`, `mongoose` depending on the ORM you are using.
+_See the [repository](https://github.com/creativogee/nest-cron-manager/tree/main/examples) for mongoos example_
 
-  ```sh
-  npm install ioredis typeorm @nestjs/config @nestjs/schedule @nestjs/typeorm pg
-  ```
+```sh
+npm install ioredis @nestjs/schedule @nestjs/mongoose mongoose
+```
 
-- Create `CronConfig` and `CronJob` models in your project which implement the `CronConfigInterface` and `CronJobInterface` respectively.
+### Models
 
-  ```typescript
-  // src/cron-manager/cron-config.model.ts
+Create `CronManagerControl`, `CronConfig` and `CronJob` models which implement the `CronManagerControlInterface`, `CronConfigInterface` and `CronJobInterface` respectively.
 
-  import { CronManager } from 'nest-cron-manager';
-  import {
-    CronConfig as CronConfigInterface,
-    CronJob as CronJobInterface,
-  } from 'nest-cron-manager/types';
-  import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
-  import { CronJob } from './cron-job.model';
+```typescript
+// src/cron-manager/cron-manager-control.model.ts
 
-  @Entity({ name: 'cron_configs' })
-  export class CronConfig implements CronConfigInterface {
-    @PrimaryGeneratedColumn()
-    id: number;
+import { CronManagerControl as CronManagerControlInterface } from 'nest-cron-manager/types';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
-    @Column({ unique: true })
-    name: string;
+@Entity('cron_manager_control')
+export class CronManagerControl implements CronManagerControlInterface {
+  @PrimaryGeneratedColumn()
+  id: number;
 
-    @Column({ nullable: true, default: CronManager.JobType.INLINE })
-    jobType?: string;
+  @Column({ default: false })
+  reset: boolean;
 
-    @Column({ default: false })
-    enabled: boolean;
+  @Column('jsonb', { default: [] })
+  replicaIds: string[];
 
-    @Column({ nullable: true, type: 'jsonb' })
-    context?: any;
+  @Column('jsonb', { default: [] })
+  staleReplicas: string[];
 
-    @Column({ nullable: true })
-    cronExpression?: string;
+  @CreateDateColumn()
+  createdAt: Date;
 
-    @Column({ nullable: true })
-    query?: string;
+  @UpdateDateColumn()
+  updatedAt: Date;
 
-    @Column({ nullable: true, default: false })
-    dryRun?: boolean;
+  @Column()
+  cmcv: string;
+}
+```
 
-    @Column({ nullable: true })
-    deletedAt?: Date;
+```typescript
+// src/cron-manager/cron-config.model.ts
 
-    @OneToMany(() => CronJob, (cronJob) => cronJob.config)
-    jobs: CronJobInterface[];
+import { CronManager } from 'nest-cron-manager';
+import {
+  CronConfig as CronConfigInterface,
+  CronJob as CronJobInterface,
+} from 'nest-cron-manager/types';
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { CronJob } from './cron-job.model';
+
+@Entity({ name: 'cron_configs' })
+export class CronConfig implements CronConfigInterface {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ unique: true })
+  name: string;
+
+  @Column({ nullable: true, default: CronManager.JobType.INLINE })
+  jobType: string;
+
+  @Column({ default: false })
+  enabled: boolean;
+
+  @Column({ nullable: true, type: 'jsonb' })
+  context: any;
+
+  @Column({ nullable: true })
+  cronExpression: string;
+
+  @Column({ nullable: true })
+  query: string;
+
+  @Column({ nullable: true, default: false })
+  silent: boolean;
+
+  @Column({ nullable: true })
+  deletedAt: Date;
+
+  @OneToMany(() => CronJob, (cronJob) => cronJob.config)
+  jobs: CronJobInterface[];
+}
+```
+
+```typescript
+// src/cron-manager/cron-job.model.ts
+
+import {
+  CronConfig as CronConfigInterface,
+  CronJob as CronJobInterface,
+} from 'nest-cron-manager/types';
+import { Column, Entity, Index, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { CronConfig } from './cron-config.model';
+
+@Entity({ name: 'cron_jobs' })
+export class CronJob implements CronJobInterface {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Index()
+  @ManyToOne(() => CronConfig, (config) => config.jobs)
+  config: CronConfigInterface;
+
+  @Column({ nullable: true, type: 'jsonb' })
+  result: any;
+
+  @Column()
+  startedAt: Date;
+
+  @Column({ nullable: true })
+  completedAt: Date;
+
+  @Column({ nullable: true })
+  failedAt: Date;
+}
+```
+
+### Controller
+
+Create `CronConfigController` to handle the creation and updating of cron config and more. You may implement whatever network and serialization protocol you wish.
+The underlying data tables and their records are fully under your control, allowing you to interact with them as you see fit.
+However, it is recommended to maintain the schema and in certain cases, as you will see below, to use library-provided methods.
+
+```typescript
+// src/cron-manager/cron-config.controller.ts
+
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { CreateCronConfig, CronManager, UpdateCronConfig } from 'nest-cron-manager';
+
+@Controller()
+export class CronManagerController {
+  constructor(private readonly cronManager: CronManager) {}
+
+  @Post('cmc/purge')
+  purgeControl() {
+    return this.cronManager.purgeControl();
   }
-  ```
 
-  ```typescript
-  // src/cron-manager/cron-job.model.ts
-
-  import { Column, Entity, Index, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-  import { CronConfig } from './cron-config.model';
-  import { CronJob as CronJobInterface } from 'nest-cron-manager/types';
-
-  @Entity({ name: 'cron_jobs' })
-  export class CronJob implements CronJobInterface {
-    @PrimaryGeneratedColumn()
-    id: number;
-
-    @Index()
-    @ManyToOne(() => CronConfig, (config) => config.jobs)
-    config: CronJobInterface;
-
-    @Column({ nullable: true, type: 'jsonb' })
-    result?: any;
-
-    @Column()
-    startedAt: Date;
-
-    @Column({ nullable: true })
-    completedAt: Date;
-
-    @Column({ nullable: true })
-    failedAt: Date;
-  }
-  ```
-
-- NB: You can implement whatever network and serialization protocol you want to use. For the purpose of this example, we will use gRPC.
-- Create these protobuf service definitions: `CreateCronConfig` and `UpdateCronConfig` in your project.
-
-  ```protobuf
-  syntax = "proto3";
-
-  package cron;
-
-  service InventoryService {
-    /**
-    * Create new inventory cron config. Cron config name must match the function name
-    */
-    rpc CreateCronConfig(cron.CreateCronConfigRequest) returns (cron.CreateCronConfigResponse) {
-        option (google.api.http) = {
-            post: "/v1/inventory/cron-config"
-            body: "*"
-        };
-    };
-
-    /**
-    * Update inventory cron config. Cron config name must match the function name
-    */
-    rpc UpdateCronConfig(cron.UpdateCronConfigRequest) returns (cron.UpdateCronConfigResponse) {
-        option (google.api.http) = {
-            put: "/v1/inventory/cron-config/{id}"
-            body: "*"
-        };
-    };
+  @Post('/cron/config')
+  async createCronConfig(@Body() body: CreateCronConfig) {
+    return this.cronManager.createCronConfig(body);
   }
 
-  ```
-
-- Create a `CronConfigController` in your project to handle the creation and updating of cron configurations.
-
-  ```typescript
-  // src/cron-manager/cron-config.controller.ts
-
-  import { CronManager } from 'nest-cron-manager';
-  import { Controller } from '@nestjs/common';
-  import { GrpcMethod } from '@nestjs/microservices';
-  import {
-    CreateCronConfigRequest,
-    UpdateCronConfigRequest,
-  } from '../../generated_ts_proto/inventory/inventory_pb';
-
-  @Controller()
-  export class CronConfigController {
-    constructor(private readonly cronManager: CronManager) {}
-
-    @GrpcMethod('InventoryService', 'CreateCronConfig')
-    async createCronConfig(data: CreateCronConfigRequest.AsObject) {
-      return this.cronManager.createCronConfig(data);
-    }
-
-    @GrpcMethod('InventoryService', 'UpdateCronConfig')
-    async updateCronConfig(data: UpdateCronConfigRequest.AsObject) {
-      return this.cronManager.updateCronConfig(data);
-    }
-
-    // You have the flexibility to add additional methods/controllers as needed. 
-    // The underlying data tables and their records are fully under your control, allowing you to interact with them as you see fit.
-    // However, the shcemas must continue to conform to the CronConfigInterface` and `CronJobInterface`.
+  @Put('/cron/config/:id')
+  async updateCronConfig(@Body() body: UpdateCronConfig, @Param('id') id: string) {
+    return this.cronManager.updateCronConfig({ ...body, id: +id });
   }
-  ```
 
-- Create a `CacheService` in your project and ensure it implements a `getClient` method.
-
-  ```typescript
-  import { Injectable, OnModuleDestroy } from '@nestjs/common';
-  import { ConfigService } from '@nestjs/config';
-  import Redis from 'ioredis';
-
-  @Injectable()
-  export class CacheService implements OnModuleDestroy {
-    private client: Redis;
-
-    constructor(private readonly config: ConfigService) {
-      this.client = new Redis(this.config.get('app.redisUrl'));
-    }
-
-    async onModuleDestroy() {
-      await this.client.quit();
-    }
-
-    getClient(): Redis {
-      return this.client;
-    }
+  @Get('/cron/config')
+  async listCronConfig() {
+    return this.cronManager.listCronConfig();
   }
-  ```
 
-- Implement nestjs config service in your project. See the [nestjs config documentation](https://docs.nestjs.com/techniques/configuration) for more information.
+  @Put('/cron/config/:id/toggle')
+  async enableCronConfig(@Param('id') id: string) {
+    return this.cronManager.toggleCronConfig(+id);
+  }
 
-  ```typescript
-  import { registerAs } from '@nestjs/config';
+  @Put('/cron/config/all/enable')
+  async enableAllCronConfig() {
+    return this.cronManager.enableAllCronConfig();
+  }
 
-  export default registerAs('app', () => ({
-    redisUrl: process.env.REDIS_URL,
-    cronManager: {
-      enabled: process.env.CRON_MANAGER_ENABLED,
-      querySecret: process.env.CRON_MANAGER_QUERY_SECRET,
-    },
-  }));
-  ```
+  @Put('/cron/config/all/disable')
+  async disableAllCronConfig() {
+    return this.cronManager.disableAllCronConfig();
+  }
+}
+```
 
-### Instantiating the CronManager class
+### Service
+
+Create a `CacheService` in your project and ensure it implements a `getClient` method.
+
+```typescript
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
+
+@Injectable()
+export class CacheService implements OnModuleDestroy {
+  private client: Redis;
+
+  constructor(private readonly config: ConfigService) {
+    this.client = new Redis(this.config.get('app.redisUrl'));
+  }
+
+  async onModuleDestroy() {
+    await this.client.quit();
+  }
+
+  getClient(): Redis {
+    return this.client;
+  }
+}
+```
+
+### Module
 
 Create an instance of CronManager by passing the required dependencies specified in `CronManagerDeps`:
 
@@ -230,22 +249,25 @@ Create an instance of CronManager by passing the required dependencies specified
 
 import { CacheModule } from '@/cache/cache.module';
 import { CacheService } from '@/cache/cache.service';
-import { Logger, Module } from '@nestjs/common';
+import { PostModule } from '@/post/post.module';
+import { UserModule } from '@/user/user.module';
+import { forwardRef, Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getEntityManagerToken, getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { CronManager } from 'nest-cron-manager';
 import { EntityManager, Repository } from 'typeorm';
-import { CronConfigController } from './cron-config.controller';
 import { CronConfig } from './cron-config.model';
 import { CronJob } from './cron-job.model';
 import { CronJobService } from './cron-job.service';
-import { ProductModule } from './product/product.module';
+import { CronManagerControl } from './cron-manager-control.model';
+import { CronManagerController } from './cron-manager.controller';
 
 @Module({
-  controllers: [CronConfigController],
+  controllers: [CronManagerController],
   imports: [
+    TypeOrmModule.forFeature([CronConfig, CronJob, CronManagerControl]),
     CacheModule,
-    TypeOrmModule.forFeature([CronConfig, CronJob]),
+    UserModule,
     // Be mindful of circular dependencies for modules
     // which import the CronMangerModule
     forwardRef(() => ProductModule),
@@ -255,30 +277,36 @@ import { ProductModule } from './product/product.module';
     {
       provide: CronManager,
       useFactory: async (
+        entityManager: EntityManager,
+        cronManagerControlRepository: Repository<CronManagerControl>,
         cronConfigRepository: Repository<CronConfig>,
         cronJobRepository: Repository<CronJob>,
-        configService: ConfigService,
         redisService: CacheService,
         cronJobService: CronJobService,
-        entityManager: EntityManager,
-      ) =>
-        new CronManager({
+        configService: ConfigService,
+      ) => {
+        return new CronManager({
+          replicaId: configService.get('app.cronManager.replicaId'),
+          enabled: configService.get('app.cronManager.enabled'),
+          querySecret: configService.get('app.cronManager.querySecret'),
           logger: new Logger(CronManager.name),
-          configService,
+          entityManager,
+          cronManagerControlRepository,
           cronConfigRepository,
           cronJobRepository,
           redisService,
           cronJobService,
-          entityManager,
-          ormType: 'typeorm',
-        }),
+          orm: 'typeorm',
+        });
+      },
       inject: [
+        getEntityManagerToken(),
+        getRepositoryToken(CronManagerControl),
         getRepositoryToken(CronConfig),
         getRepositoryToken(CronJob),
-        ConfigService,
         CacheService,
         CronJobService,
-        getEntityManagerToken(),
+        ConfigService,
       ],
     },
   ],
@@ -289,20 +317,24 @@ export class CronMangerModule {}
 
 ### CronManager Dependencies
 
-| Dependency           | Description                                                                | Required |
-| -------------------- | -------------------------------------------------------------------------- | -------- |
-| logger               | A logger instance                                                          | true     |
-| configService        | Your app's config service instance                                         | true     |
-| cronConfigRepository | The repository for the `CronConfig` model                                  | true     |
-| cronJobRepository    | The repository for the `CronJob` model                                     | true     |
-| redisService         | A cache service instance                                                   | true     |
-| ormType              | The ORM type to use (currently only supports `typeorm` or `mongoose`)      | true     |
-| cronJobService       | This service will constitute the `method` jobType handlers to be triggered | false    |
-| entityManager        | This is the ORM's entity manager instance (for `typeorm` only)             | false    |
+| Dependency                   | Description                                                               | Required |
+| ---------------------------- | ------------------------------------------------------------------------- | -------- |
+| replicaId                    | A unique identifier for every application replica                         | true     |
+| enabled                      | A boolean value indicating if the cron manager is enabled                 | false    |
+| querySecret                  | A secret value for encrypting and decrypting queries                      | false    |
+| logger                       | An instance of the Logger class, initialized with the name of CronManager | true     |
+| entityManager                | A `typeorm` entity manager requred for running `query` job types          | false    |
+| cronManagerControlRepository | A repository for managing cron manager control data                       | true     |
+| cronConfigRepository         | A repository for managing cron configuration data                         | true     |
+| cronJobRepository            | A repository for managing cron job data                                   | true     |
+| redisService                 | A service for interacting with Redis. Required for distributed locking    | false    |
+| cronJobService               | A service for managing cron jobs. Required for `method` job types         | false    |
+| watchTime                    | The cron manager control (cmc) watch time.                                | false    |
+| orm                          | The ORM to use for database operations                                    | true     |
 
 ### Executing cron jobs
 
-Depending on the specified `jobType` when creating your cronConfig, there are different ways the `nest-cron-manager` may execute a job:
+Depending on the specified `jobType` when creating your cronConfig, there are different ways the `nest-cron-manager` may execute jobs:
 
 #### 1. `inline`:
 
@@ -382,8 +414,7 @@ export class SomeService {
 
 #### 2. `query`:
 
-The `nest-cron-manager` will execute a valid sql query if you create a `CronConfig` with the jobType set to `query`, and a valid cronExpression specified. The query will be encrypted at rest using the `querySecret` from the `configService`. During runtime, the same `querySecret` will be used to decrypt the query for execution.
-
+The `nest-cron-manager` will execute a valid sql query if you create a `CronConfig` with the jobType set to `query`, and a valid cronExpression specified. The query will be encrypted at rest and decrypted at runtime using the `querySecret` provided when creating the `CronManager` instance.
 
 ```sh
 curl -X 'POST' \
@@ -419,7 +450,7 @@ Below is an example of how you may define your method on a `CronJobService` clas
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { bindMethods } from 'nest-cron-manager';
+import { bindMethods, Lens } from 'nest-cron-manager';
 
 @Injectable()
 export class CronJobService {
@@ -431,7 +462,25 @@ export class CronJobService {
   }
 
   async doSomething() {
-    // Perform some operation
+    const lens = new Lens();
+
+    try {
+      // Perform some operation
+
+      // Capture logs and metrics
+      lens.capture({
+        title: 'Operation 1',
+        message: 'Operation 1 successful',
+      });
+    } catch (error) {
+      // Capture error logs and metrics
+      lens.capture({
+        title: 'Failed to do something',
+        message: error.message,
+      });
+    }
+
+    return lens;
   }
 }
 ```

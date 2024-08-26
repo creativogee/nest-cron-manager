@@ -15,21 +15,20 @@ import {
   Lens as LensInterface,
   UpdateCronConfig,
 } from '../types';
-import { isJSON, validateDeps } from './helper';
+import { intervalToCron, isJSON, validateDeps } from './helper';
 
 const CMC_WATCH = 'cmc';
 const out_cmc = (cronConfig: CronConfig) => cronConfig.name !== CMC_WATCH;
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
+  private replicaId: string;
   private logger: any;
   private cronManagerControlRepository: any;
-  private configService: any;
   private cronConfigRepository: any;
   private cronJobRepository: any;
   private redisService: any;
-  private ormType: 'typeorm' | 'mongoose';
-  private appCount: number;
-  private watchTime: string = '*/2 * * * * *';
+  private orm: 'typeorm' | 'mongoose';
+  private watchTime: string;
   private enabled: boolean;
   private querySecret: string;
   private entityManager: any;
@@ -44,12 +43,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   };
 
   constructor({
+    replicaId,
     logger,
-    enabled,
-    watchTime,
-    appCount,
+    enabled = false,
+    watchTime = '5s',
     querySecret,
-    ormType,
+    orm,
     cronConfigRepository,
     cronJobRepository,
     redisService,
@@ -57,27 +56,27 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     entityManager,
     cronManagerControlRepository,
   }: CronManagerDeps) {
+    this.replicaId = replicaId;
     this.logger = logger;
     this.cronManagerControlRepository = cronManagerControlRepository;
-    this.ormType = ormType;
+    this.orm = orm;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
     this.redisService = redisService;
     this.entityManager = entityManager;
     this.cronJobService = cronJobService;
     this.enabled = enabled;
-    this.watchTime = watchTime;
-    this.appCount = appCount;
+    this.watchTime = intervalToCron(watchTime, this.logger);
     this.querySecret = querySecret;
   }
 
   onModuleInit() {
     const deps = validateDeps({
+      replicaId: this.replicaId,
       cronManagerControlRepository: this.cronManagerControlRepository,
       cronConfigRepository: this.cronConfigRepository,
       cronJobRepository: this.cronJobRepository,
-      ormType: this.ormType,
-      configService: this.configService,
+      orm: this.orm,
       logger: this.logger,
       redisService: this.redisService,
       entityManager: this.entityManager,
@@ -92,16 +91,16 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   checkInit() {
     const statuses = [
       {
+        name: 'replicaId',
+        status: this.replicaId ? this.replicaId : 'Not Found',
+      },
+      {
         name: 'logger',
         status: this.logger ? 'OK' : 'Not Found',
       },
       {
         name: 'cronManagerControlRepository',
         status: this.cronManagerControlRepository ? 'OK' : 'Not Found',
-      },
-      {
-        name: 'configService',
-        status: this.configService ? 'OK' : 'Not Found',
       },
       {
         name: 'cronConfigRepository',
@@ -116,8 +115,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         status: this.redisService ? 'OK' : 'Not Found',
       },
       {
-        name: 'ormType',
-        status: this.ormType ? 'OK' : 'Not Found',
+        name: 'orm',
+        status: this.orm ? 'OK' : 'Not Found',
       },
       {
         name: 'cronJobService',
@@ -132,10 +131,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         status: this.enabled ? 'OK' : 'Not Found',
       },
       {
-        name: 'appCount',
-        status: this.appCount ? 'OK' : 'Not Found',
-      },
-      {
         name: 'watchTime',
         status: this.watchTime ? 'OK' : 'Not Found',
       },
@@ -146,6 +141,250 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     ];
 
     return statuses;
+  }
+
+  private async initializeJobs() {
+    if (!this.enabled) {
+      return;
+    }
+
+    const [control, cronConfigs] = await Promise.all([
+      this.databaseOps.getControl(),
+      this.databaseOps.findCronConfig(),
+    ]);
+
+    const cmc = cronConfigs.find((cronConfig: CronConfig) => cronConfig.name === CMC_WATCH);
+
+    if (!control && !!this.cronManagerControlRepository) {
+      await this.databaseOps.createControl({ replicaId: this.replicaId });
+    }
+
+    if (control && !control.replicaIds.includes(this.replicaId)) {
+      control.replicaIds.push(this.replicaId);
+      await this.databaseOps.updateControl(control);
+    }
+
+    if (!cmc) {
+      const { cronConfig } = await this.createCronConfig({
+        name: CMC_WATCH,
+        enabled: true,
+        jobType: CronManager.JobType.QUERY,
+        silent: true,
+        cronExpression: this.watchTime,
+      });
+
+      cronConfigs.unshift(cronConfig);
+    }
+
+    await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
+
+    const updatedCronConfigs = await this.databaseOps.findCronConfig();
+
+    const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
+
+    this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
+  }
+
+  private async scheduleJob(cronConfig: CronConfig) {
+    if (
+      cronConfig.enabled &&
+      !cronConfig.deletedAt &&
+      cronConfig.cronExpression &&
+      [CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(cronConfig.jobType) &&
+      !(
+        cronConfig.name !== CMC_WATCH &&
+        cronConfig.jobType === CronManager.JobType.QUERY &&
+        !cronConfig.query
+      )
+    ) {
+      const job = new Job(cronConfig.cronExpression, () => {
+        this.executeJob(cronConfig);
+      });
+
+      job.start();
+      this.cronJobs.set(cronConfig.name, job);
+
+      if (cronConfig.name !== CMC_WATCH) {
+        this.logger.log(`Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`);
+      }
+    }
+  }
+
+  private async executeJob(cronConfig: CronConfig) {
+    let execution: JobExecution;
+
+    const control = await this.databaseOps.getControl();
+
+    if (control?.staleReplicas.length) {
+      await this.resetJobs(control);
+    }
+
+    if (cronConfig.name === CMC_WATCH) {
+      return;
+    }
+
+    if (cronConfig.jobType === CronManager.JobType.QUERY) {
+      if (!cronConfig.query) {
+        this.logger.log(`Job: ${cronConfig.name} query not found`);
+        return;
+      }
+
+      const query = this.decryptQuery(cronConfig.query);
+
+      execution = async () => this.databaseOps?.query(`${query}`);
+
+      if (!execution) {
+        this.logger.log(`Job: ${cronConfig.name} query failed to execute`);
+        return;
+      }
+    }
+
+    if (cronConfig.jobType === CronManager.JobType.METHOD) {
+      execution = this.cronJobService?.[cronConfig.name];
+    }
+
+    await this.handleJob(cronConfig.name, execution);
+  }
+
+  private async resetJobs(control: CronManagerControl) {
+    const isStale = control?.staleReplicas.includes(this.replicaId);
+
+    if (!this.enabled || !isStale) {
+      return;
+    }
+
+    const cronConfigs = await this.databaseOps.findCronConfig();
+
+    this.cronJobs.forEach((job, name) => {
+      job.stop();
+      this.cronJobs.delete(name);
+    });
+
+    await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
+
+    const index = control.staleReplicas.indexOf(this.replicaId);
+    if (index !== -1) {
+      // this is critical in case of non-unique replicaIds
+      control.staleReplicas.splice(index, 1);
+    }
+    let latestVersion = control.cmcv;
+
+    try {
+      const _control = await this.databaseOps.updateControl(control);
+
+      if (!_control) {
+        this.logger.warn(
+          'CronManager - CronManagerControl' +
+            `${this.orm === 'mongoose' ? ' model ' : ' repository '}` +
+            'not found',
+        );
+        return;
+      }
+    } catch (error) {
+      this.logger.log('Failed to reset jobs; Retrying...');
+      const latestControl = await this.databaseOps.getControl();
+      latestVersion = latestControl.cmcv;
+      control.cmcv = latestVersion;
+      await this.resetJobs(control);
+    }
+
+    const updatedCronConfigs = await this.databaseOps.findCronConfig();
+    const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
+
+    this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
+  }
+
+  private async startJob(name: string) {
+    const cronConfig = await this.databaseOps.findOneCronConfig({ name });
+
+    if (!cronConfig?.enabled || cronConfig?.deletedAt) {
+      throw new Error();
+    }
+
+    let cronJob: CronJob;
+
+    if (!cronConfig.silent) {
+      cronJob = await this.databaseOps.createCronJob({
+        config: cronConfig,
+        startedAt: new Date(),
+      });
+    }
+
+    const context = JSON.parse(cronConfig?.context || '{}');
+    cronJob.config = cronConfig;
+
+    return { job: cronJob, context, silent: cronConfig?.silent };
+  }
+
+  private async endJob({ job, status, result }: EndJob) {
+    job.completedAt = status === 'Success' ? new Date() : null;
+    job.failedAt = status === 'Failed' ? new Date() : null;
+    job.result = typeof result === 'object' ? JSON.stringify(result) : result;
+
+    await this.databaseOps.saveCronJob(job);
+  }
+
+  private async expireJobs(control?: CronManagerControl) {
+    if (!control) {
+      this.resetJobs(control);
+    }
+
+    if (control) {
+      control.staleReplicas = control.replicaIds;
+      let latestVersion = control.cmcv;
+
+      try {
+        const _control = await this.databaseOps.updateControl(control);
+
+        if (!_control) {
+          throw new Error(
+            'CronManager - CronManagerControl' +
+              `${this.orm === 'mongoose' ? ' model ' : ' repository '}` +
+              'not found',
+          );
+        }
+      } catch (error) {
+        this.logger.log('Failed to expire jobs; Retrying...');
+        const latestControl = await this.databaseOps.getControl();
+        latestVersion = latestControl.cmcv;
+        control.cmcv = latestVersion;
+        await this.expireJobs(control);
+      }
+    }
+  }
+
+  private encryptQuery(text: string): string {
+    if (!this.querySecret) {
+      throw new Error('Query secret not found');
+    }
+
+    return crypto.AES.encrypt(text, this.querySecret).toString();
+  }
+
+  private decryptQuery(text: string): string {
+    if (!this.querySecret) {
+      throw new Error('Query secret not found');
+    }
+
+    const bytes = crypto.AES.decrypt(text, this.querySecret);
+    return bytes.toString(crypto.enc.Utf8);
+  }
+
+  private getTotalEnabledJobs(cronConfigs: CronConfig[]): number {
+    return cronConfigs.filter((cronConfig: CronConfig) => {
+      switch (true) {
+        case cronConfig.name === CMC_WATCH:
+          return true;
+        case cronConfig.jobType === CronManager.JobType.QUERY:
+          return cronConfig.enabled && cronConfig.cronExpression && cronConfig.query;
+        case cronConfig.jobType === CronManager.JobType.METHOD:
+          return cronConfig.enabled && cronConfig.cronExpression;
+        case cronConfig.jobType === CronManager.JobType.INLINE:
+          return cronConfig.enabled;
+        default:
+          return false;
+      }
+    }).length;
   }
 
   async createCronConfig(data: CreateCronConfig) {
@@ -272,15 +511,36 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     };
   }
 
+  async purgeControl() {
+    const control = await this.databaseOps.getControl();
+    control.replicaIds = [];
+    try {
+      const _control = await this.databaseOps.updateControl(control);
+
+      if (!_control) {
+        this.logger.warn(
+          'CronManager - CronManagerControl' +
+            `${this.orm === 'mongoose' ? ' model ' : ' repository '}` +
+            'not found',
+        );
+        return;
+      }
+    } catch (error) {
+      this.logger.log('Failed to purge control; Retrying...');
+      await this.purgeControl();
+    }
+    // reinitialize jobs
+    await this.initializeJobs();
+    return { success: true };
+  }
+
   /**
    * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
    * @param execution - The function to be executed
-   * @warning Failure to match these names WILL result in unexpected behavior
+   * @warning Failure to match these names WILL lead to unexpected behavior
    */
   async handleJob(name: string, execution: JobExecution) {
-    const config = this.configService?.get('app');
-    const isEnabled = config?.cronManager?.enabled ?? this.enabled;
-    if (!isEnabled) {
+    if (!this.enabled) {
       return;
     }
 
@@ -295,11 +555,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     try {
       const startedJob = await this.startJob(name);
 
-      const { job, context, dryRun } = startedJob || {};
+      const { job, context, silent } = startedJob || {};
 
       // Here, if job is falsy it can only be because it's a dry run
       // If it's not a dry run, we throw an error
-      if (!job && !dryRun) {
+      if (!job && !silent) {
         throw new Error(`Job: ${name}; Failed to start`);
       }
 
@@ -329,7 +589,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const lens: LensInterface = new Lens();
 
       try {
-        result = await execution(context, config, lens);
+        result = await execution(context, lens);
 
         if (result && job.config.jobType === CronManager.JobType.METHOD) {
           switch (true) {
@@ -356,7 +616,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         status = 'Failed';
       }
 
-      if (!dryRun && job) {
+      if (!silent && job) {
         await this.endJob({ job, status, result });
       }
     } catch (error) {
@@ -384,231 +644,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         this.logger.log(endMessage);
       }
     }
-  }
-
-  private async initializeJobs() {
-    const isEnabled = this.configService?.get('app.cronManager.enabled') ?? this.enabled;
-
-    if (!isEnabled) {
-      return;
-    }
-
-    const [control, cronConfigs] = await Promise.all([
-      this.databaseOps.getControl(),
-      this.databaseOps.findCronConfig(),
-    ]);
-
-    const cmc = cronConfigs.find((cronConfig: CronConfig) => cronConfig.name === CMC_WATCH);
-
-    if (!control && !!this.cronManagerControlRepository) {
-      await this.databaseOps.createControl();
-    }
-
-    if (!cmc) {
-      const { cronConfig } = await this.createCronConfig({
-        name: CMC_WATCH,
-        enabled: true,
-        jobType: CronManager.JobType.QUERY,
-        dryRun: true,
-        cronExpression: this.watchTime,
-      });
-
-      cronConfigs.unshift(cronConfig);
-    }
-
-    await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
-
-    const updatedCronConfigs = await this.databaseOps.findCronConfig();
-
-    const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
-
-    this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
-  }
-
-  private async scheduleJob(cronConfig: CronConfig) {
-    if (
-      cronConfig.enabled &&
-      !cronConfig.deletedAt &&
-      cronConfig.cronExpression &&
-      [CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(cronConfig.jobType) &&
-      !(
-        cronConfig.name !== CMC_WATCH &&
-        cronConfig.jobType === CronManager.JobType.QUERY &&
-        !cronConfig.query
-      )
-    ) {
-      const job = new Job(cronConfig.cronExpression, () => {
-        this.executeJob(cronConfig);
-      });
-
-      job.start();
-      this.cronJobs.set(cronConfig.name, job);
-
-      if (cronConfig.name !== CMC_WATCH) {
-        this.logger.log(`Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`);
-      }
-    }
-  }
-
-  private async executeJob(cronConfig: CronConfig) {
-    let execution: JobExecution;
-
-    const control = await this.databaseOps.getControl();
-
-    if (control?.reset) {
-      await this.resetJobs(control);
-    }
-
-    if (cronConfig.name === CMC_WATCH) {
-      return;
-    }
-
-    if (cronConfig.jobType === CronManager.JobType.QUERY) {
-      if (!cronConfig.query) {
-        this.logger.log(`Job: ${cronConfig.name} query not found`);
-        return;
-      }
-
-      const query = this.decryptQuery(cronConfig.query);
-
-      execution = async () => this.databaseOps?.query(`${query}`);
-
-      if (!execution) {
-        this.logger.log(`Job: ${cronConfig.name} query failed to execute`);
-        return;
-      }
-    }
-
-    if (cronConfig.jobType === CronManager.JobType.METHOD) {
-      execution = this.cronJobService?.[cronConfig.name];
-    }
-
-    await this.handleJob(cronConfig.name, execution);
-  }
-
-  private async resetJobs(control: CronManagerControl) {
-    const isEnabled = this.configService?.get('app.cronManager.enabled') ?? this.enabled;
-    if (!isEnabled) {
-      return;
-    }
-
-    const cronConfigs = await this.databaseOps.findCronConfig();
-
-    this.cronJobs.forEach((job, name) => {
-      job.stop();
-      this.cronJobs.delete(name);
-    });
-
-    await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
-
-    control.reset = false;
-    if (control.resetCount > 0) {
-      control.resetCount -= 1;
-    }
-
-    let latestVersion = control.cmcv;
-
-    try {
-      await this.databaseOps.updateControl(control);
-    } catch (error) {
-      const latestControl = await this.databaseOps.getControl();
-      latestVersion = latestControl.cmcv;
-      control.cmcv = latestVersion;
-      await this.databaseOps.updateControl(control);
-    }
-
-    const updatedCronConfigs = await this.databaseOps.findCronConfig();
-    const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
-
-    this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
-  }
-
-  private async startJob(name: string) {
-    const cronConfig = await this.databaseOps.findOneCronConfig({ name });
-
-    if (!cronConfig?.enabled || cronConfig?.deletedAt) {
-      throw new Error();
-    }
-
-    let cronJob: CronJob;
-
-    if (!cronConfig.dryRun) {
-      cronJob = await this.databaseOps.createCronJob({
-        config: cronConfig,
-        startedAt: new Date(),
-      });
-    }
-
-    const context = JSON.parse(cronConfig?.context || '{}');
-    cronJob.config = cronConfig;
-
-    return { job: cronJob, context, dryRun: cronConfig?.dryRun };
-  }
-
-  private async endJob({ job, status, result }: EndJob) {
-    job.completedAt = status === 'Success' ? new Date() : null;
-    job.failedAt = status === 'Failed' ? new Date() : null;
-    job.result = typeof result === 'object' ? JSON.stringify(result) : result;
-
-    await this.databaseOps.saveCronJob(job);
-  }
-
-  private async expireJobs(control: CronManagerControl) {
-    if (!control) {
-      this.resetJobs(control);
-    }
-
-    if (control) {
-      control.reset = true;
-      control.resetCount = this.appCount;
-
-      let latestVersion = control.cmcv;
-
-      try {
-        this.databaseOps.updateControl(control);
-      } catch (error) {
-        const latestControl = await this.databaseOps.getControl();
-        latestVersion = latestControl.cmcv;
-        control.cmcv = latestVersion;
-        this.databaseOps.updateControl(control);
-      }
-    }
-  }
-
-  private encryptQuery(text: string): string {
-    const querySecret = this.configService?.get('app.cronManager.querySecret') ?? this.querySecret;
-    if (!querySecret) {
-      throw new Error('Query secret not found');
-    }
-
-    return crypto.AES.encrypt(text, querySecret).toString();
-  }
-
-  private decryptQuery(text: string): string {
-    const querySecret = this.configService?.get('app.cronManager.querySecret') ?? this.querySecret;
-    if (!querySecret) {
-      throw new Error('Query secret not found');
-    }
-
-    const bytes = crypto.AES.decrypt(text, querySecret);
-    return bytes.toString(crypto.enc.Utf8);
-  }
-
-  private getTotalEnabledJobs(cronConfigs: CronConfig[]): number {
-    return cronConfigs.filter((cronConfig: CronConfig) => {
-      switch (true) {
-        case cronConfig.name === CMC_WATCH:
-          return true;
-        case cronConfig.jobType === CronManager.JobType.QUERY:
-          return cronConfig.enabled && cronConfig.cronExpression && cronConfig.query;
-        case cronConfig.jobType === CronManager.JobType.METHOD:
-          return cronConfig.enabled && cronConfig.cronExpression;
-        case cronConfig.jobType === CronManager.JobType.INLINE:
-          return cronConfig.enabled;
-        default:
-          return false;
-      }
-    }).length;
   }
 }
 

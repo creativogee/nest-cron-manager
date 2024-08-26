@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import {
   CreateCronConfig,
@@ -14,14 +15,12 @@ export class TypeOrmOperations implements DatabaseOps {
   private cronManagerControlRepository: any;
   private cronConfigRepository: any;
   private cronJobRepository: any;
-  private configService: any;
   private entityManager: any;
   private querySecret: string;
 
   constructor({
     cronConfigRepository,
     cronJobRepository,
-    configService,
     entityManager,
     cronManagerControlRepository,
     querySecret,
@@ -29,23 +28,15 @@ export class TypeOrmOperations implements DatabaseOps {
     this.cronManagerControlRepository = cronManagerControlRepository;
     this.cronConfigRepository = cronConfigRepository;
     this.cronJobRepository = cronJobRepository;
-    this.configService = configService;
     this.entityManager = entityManager;
     this.querySecret = querySecret;
   }
 
-  async createControl(): Promise<CronManagerControl> {
-    if (!this.cronManagerControlRepository) {
-      throw new Error('CronManager - Control repository not found');
-    }
-    return this.cronManagerControlRepository.save({ cmcv: randomUUID() });
+  async createControl({ replicaId }): Promise<CronManagerControl> {
+    return this.cronManagerControlRepository.save({ cmcv: randomUUID(), replicaIds: [replicaId] });
   }
 
   async getControl(): Promise<CronManagerControl | null> {
-    if (!this.cronManagerControlRepository) {
-      throw new Error('CronManager - Control repository not found');
-    }
-
     return this.cronManagerControlRepository
       .find({
         order: {
@@ -58,10 +49,6 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
-    if (!this.cronManagerControlRepository) {
-      throw new Error('CronManager - Control repository not found');
-    }
-
     return this.cronManagerControlRepository
       .update({ cmcv: data.cmcv }, { ...data, cmcv: randomUUID() })
       .then(() => this.cronManagerControlRepository.findOne({ where: { cmcv: data.id } }));
@@ -84,9 +71,8 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async saveCronConfig(data: CronConfig): Promise<CronConfig> {
-    const querySecret = this.configService?.get('app.cronManager.querySecret') ?? this.querySecret;
     if (data.jobType === 'query') {
-      if (!querySecret) {
+      if (!this.querySecret) {
         throw new Error('CronManager - Query secret not found');
       }
     }
@@ -121,26 +107,15 @@ export class MongooseOperations implements DatabaseOps {
     this.cronJobModel = cronJobModel;
   }
 
-  async createControl(): Promise<CronManagerControl> {
-    if (!this.cronManagerControlModel) {
-      throw new Error('CronManager - Control model not found');
-    }
-    return this.cronManagerControlModel.create({ cmcv: randomUUID() });
+  async createControl({ replicaId }): Promise<CronManagerControl> {
+    return this.cronManagerControlModel.create({ cmcv: randomUUID(), replicaIds: [replicaId] });
   }
 
   async getControl(): Promise<CronManagerControl | null> {
-    if (!this.cronManagerControlModel) {
-      throw new Error('CronManager - Control model not found');
-    }
-
     return this.cronManagerControlModel.findOne();
   }
 
   async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
-    if (!this.cronManagerControlModel) {
-      throw new Error('CronManager - Control model not found');
-    }
-
     return this.cronManagerControlModel.findOneAndUpdate(
       { cmcv: data.cmcv },
       { ...data, cmcv: randomUUID() },
@@ -217,14 +192,17 @@ export const validateDeps = ({
   cronManagerControlRepository,
   cronConfigRepository,
   cronJobRepository,
-  configService,
-  ormType,
+  orm,
   logger,
   redisService,
   entityManager,
   querySecret,
 }: CronManagerDeps) => {
-  if (['typeorm', 'mongoose'].indexOf(ormType) === -1) {
+  if (!cronManagerControlRepository) {
+    throw new Error('CronManager - Control repository not provided');
+  }
+
+  if (['typeorm', 'mongoose'].indexOf(orm) === -1) {
     throw new Error('CronManager - Invalid ORM type');
   }
 
@@ -242,7 +220,7 @@ export const validateDeps = ({
 
   let databaseOps: DatabaseOps;
 
-  if (ormType === 'typeorm') {
+  if (orm === 'typeorm') {
     if (
       !cronConfigRepository.metadata ||
       !cronJobRepository.metadata ||
@@ -256,13 +234,12 @@ export const validateDeps = ({
       cronManagerControlRepository,
       cronConfigRepository,
       cronJobRepository,
-      configService,
       entityManager,
       querySecret,
     });
   }
 
-  if (ormType === 'mongoose') {
+  if (orm === 'mongoose') {
     if (!cronConfigRepository.prototype || !cronJobRepository.prototype) {
       throw new Error('CronManager - Invalid Mongoose repositories');
     }
@@ -288,4 +265,29 @@ export const isJSON = (str: string): boolean => {
   } catch (e) {
     return false;
   }
+};
+
+export const intervalToCron = (interval: string, logger?: Logger): string => {
+  // Updated regex to match numbers with optional 's' for seconds
+  const match = /^(\d+)(s?)$/.exec(interval);
+  if (!match) {
+    logger?.warn('Invalid interval format. Defaulting to 5 seconds.');
+    return '*/5 * * * * *';
+  }
+
+  let value = parseInt(match[1], 10);
+  const unit = match[2] || 's'; // Default to 's' if unit is not provided
+
+  if (unit !== 's') {
+    logger?.warn('Invalid unit provided. Defaulting to seconds.');
+  }
+
+  // Ensure the value does not exceed 5 seconds
+  if (value > 5) {
+    logger?.warn('Interval exceeds 5 seconds. Falling back to 5 seconds.');
+    value = 5;
+  }
+
+  // Return the cron expression for seconds
+  return `*/${value} * * * * *`;
 };
