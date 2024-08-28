@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import {
   CreateCronConfig,
   CronManager,
@@ -9,9 +18,14 @@ import {
 export class CronManagerController {
   constructor(private readonly cronManager: CronManager) {}
 
-  @Post('cmc/purge')
+  @Delete('cmc')
   purgeControl() {
     return this.cronManager.purgeControl();
+  }
+
+  @Patch('cmc')
+  toggleControl() {
+    return this.cronManager.toggleControl();
   }
 
   @Post('/cron/config')

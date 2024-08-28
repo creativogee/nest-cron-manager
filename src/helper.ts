@@ -49,9 +49,13 @@ export class TypeOrmOperations implements DatabaseOps {
   }
 
   async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
-    return this.cronManagerControlRepository
+    const found = await this.cronManagerControlRepository
       .update({ cmcv: data.cmcv }, { ...data, cmcv: randomUUID() })
-      .then(() => this.cronManagerControlRepository.findOne({ where: { cmcv: data.id } }));
+      .then(() => this.cronManagerControlRepository.find());
+
+    if (found?.length) {
+      return found[0];
+    }
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {

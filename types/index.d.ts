@@ -23,6 +23,7 @@ export class CronManager {
   enableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
   disableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
   purgeControl(): Promise<{ success: boolean }>;
+  toggleControl(): Promise<{ enabled: boolean }>;
 
   /**
    * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
@@ -61,6 +62,10 @@ export class Lens {
 export type JobExecution = (context?: JobContext, lens?: Lens) => Promise<any>;
 
 export interface CronManagerControl {
+  /**
+   * A flag indicating whether the cron manager is enabled.
+   */
+  enabled: boolean;
   /**
    * The unique identifier for the CronManagerControl record.
    * Can be a number or string depending on the implementation.
@@ -183,7 +188,6 @@ export interface CronJob {
    */
   failedAt: Date | null;
 }
-
 
 export interface CronManagerDeps {
   /**

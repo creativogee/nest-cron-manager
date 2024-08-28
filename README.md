@@ -35,7 +35,7 @@ npm install ioredis typeorm @nestjs/schedule @nestjs/typeorm pg
 
 #### For Mongoose:
 
-_See the [repository](https://github.com/creativogee/nest-cron-manager/tree/main/examples) for mongoos example_
+_See the [repository](https://github.com/creativogee/nest-cron-manager/tree/main/examples) for mongoose example_
 
 ```sh
 npm install ioredis @nestjs/schedule @nestjs/mongoose mongoose
@@ -61,6 +61,9 @@ import {
 export class CronManagerControl implements CronManagerControlInterface {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ default: true })
+  enabled: boolean;
 
   @Column({ default: false })
   reset: boolean;
@@ -162,7 +165,7 @@ export class CronJob implements CronJobInterface {
 
 ### Controller
 
-Create `CronConfigController` to handle the creation and updating of cron config and more. You may implement whatever network and serialization protocol you wish.
+Create `CronManagerController` to handle the creation and updating of cron config and more. You may implement whatever network and serialization protocol you wish.
 The underlying data tables and their records are fully under your control, allowing you to interact with them as you see fit.
 However, it is recommended to maintain the schema and in certain cases, as you will see below, to use library-provided methods.
 
@@ -191,25 +194,13 @@ export class CronManagerController {
     return this.cronManager.updateCronConfig({ ...body, id: +id });
   }
 
-  @Get('/cron/config')
-  async listCronConfig() {
-    return this.cronManager.listCronConfig();
-  }
-
-  @Put('/cron/config/:id/toggle')
-  async enableCronConfig(@Param('id') id: string) {
-    return this.cronManager.toggleCronConfig(+id);
-  }
-
-  @Put('/cron/config/all/enable')
-  async enableAllCronConfig() {
-    return this.cronManager.enableAllCronConfig();
-  }
-
-  @Put('/cron/config/all/disable')
-  async disableAllCronConfig() {
-    return this.cronManager.disableAllCronConfig();
-  }
+  // More endpoints:
+  // GET /cron/config - List all cron configs
+  // PUT /cron/config/:id/toggle - Toggle on/off a cron config
+  // PUT /cron/config/disable-all - Disable all cron configs
+  // PUT /cron/config/enable-all - Enable all cron configs
+  // DELETE /cmc - Purge cron manager control
+  // PATCH /cmc - Toggle cron manager control
 }
 ```
 
@@ -255,6 +246,7 @@ import { forwardRef, Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getEntityManagerToken, getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { CronManager } from 'nest-cron-manager';
+import { v4 as uuidv4 } from 'uuid';
 import { EntityManager, Repository } from 'typeorm';
 import { CronConfig } from './cron-config.model';
 import { CronJob } from './cron-job.model';
@@ -269,7 +261,7 @@ import { CronManagerController } from './cron-manager.controller';
     CacheModule,
     UserModule,
     // Be mindful of circular dependencies for modules
-    // which import the CronMangerModule
+    // which import the CronManagerModule
     forwardRef(() => ProductModule),
   ],
   providers: [
@@ -286,7 +278,7 @@ import { CronManagerController } from './cron-manager.controller';
         configService: ConfigService,
       ) => {
         return new CronManager({
-          replicaId: configService.get('app.cronManager.replicaId'),
+          replicaId: uuidv4(),
           enabled: configService.get('app.cronManager.enabled'),
           querySecret: configService.get('app.cronManager.querySecret'),
           logger: new Logger(CronManager.name),
@@ -312,7 +304,7 @@ import { CronManagerController } from './cron-manager.controller';
   ],
   exports: [CronManager],
 })
-export class CronMangerModule {}
+export class CronManagerModule {}
 ```
 
 ### CronManager Dependencies
@@ -320,7 +312,7 @@ export class CronMangerModule {}
 | Dependency                   | Description                                                               | Required |
 | ---------------------------- | ------------------------------------------------------------------------- | -------- |
 | replicaId                    | A unique identifier for every application replica                         | true     |
-| enabled                      | A boolean value indicating if the cron manager is enabled                 | false    |
+| enabled                      | A boolean value indicating whether the cron manager is enabled            | true     |
 | querySecret                  | A secret value for encrypting and decrypting queries                      | false    |
 | logger                       | An instance of the Logger class, initialized with the name of CronManager | true     |
 | entityManager                | A `typeorm` entity manager requred for running `query` job types          | false    |
@@ -342,7 +334,7 @@ Simply pass the `cronConfig` name and a callback function as first and second ar
 
 ```sh
 curl -X 'POST' \
-  'https://server.com/v1/inventory/cron-config' \
+  'https://your-server.com/cron-config' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -363,7 +355,7 @@ In this example, we are passing a `distributed` flag to indicate that the job sh
 
 We are also passing a `ttl` field to specify the time to live for the job lock in seconds.
 
-Asides the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler.
+Besides the `distributed` and `ttl` fields which are used internally, you can pass any other configuration you want to the cron job which can be accessed in the job handler.
 
 NB: The context field must be a valid JSON string.
 
@@ -418,7 +410,7 @@ The `nest-cron-manager` will execute a valid sql query if you create a `CronConf
 
 ```sh
 curl -X 'POST' \
-  'https://server.com/v1/inventory/cron-config' \
+  'https://your-server.com/cron-config' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -435,7 +427,7 @@ The `nest-cron-manager` will execute methods defined on your `CronJobService` cl
 
 ```sh
 curl -X 'POST' \
-  'https://server.com/v1/inventory/cron-config' \
+  'https://your-server.com/cron-config' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -493,4 +485,4 @@ Thank you for using `nest-cron-manager`. I hope it enhances your development exp
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - See the [LICENSE](LICENSE) file for details.

@@ -12,6 +12,9 @@ export class CronManagerControl implements CronManagerControlInterface {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ default: true })
+  enabled: boolean;
+
   @Column({ default: false })
   reset: boolean;
 

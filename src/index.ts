@@ -143,8 +143,20 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     return statuses;
   }
 
+  private async isGlobalEnabled() {
+    const control = await this.databaseOps.getControl();
+
+    if (!control && this.enabled) {
+      return true;
+    }
+
+    return control?.enabled && this.enabled;
+  }
+
   private async initializeJobs() {
-    if (!this.enabled) {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
       return;
     }
 
@@ -247,9 +259,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   private async resetJobs(control: CronManagerControl) {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     const isStale = control?.staleReplicas.includes(this.replicaId);
 
-    if (!this.enabled || !isStale) {
+    if (!isStale) {
       return;
     }
 
@@ -344,7 +362,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           );
         }
       } catch (error) {
-        this.logger.log('Failed to expire jobs; Retrying...');
         const latestControl = await this.databaseOps.getControl();
         latestVersion = latestControl.cmcv;
         control.cmcv = latestVersion;
@@ -388,8 +405,22 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async createCronConfig(data: CreateCronConfig) {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     if (data.query) {
       data.query = this.encryptQuery(data.query);
+    }
+
+    if (data.cronExpression) {
+      try {
+        new Job(data.cronExpression, () => {});
+      } catch (error) {
+        throw new Error('CronManager - Invalid cron expression');
+      }
     }
 
     if (data.name === CMC_WATCH) {
@@ -408,6 +439,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async updateCronConfig({ id, ...update }: UpdateCronConfig) {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     const [control, found] = await Promise.all([
       this.databaseOps.getControl(),
       this.databaseOps.findOneCronConfig({ id }),
@@ -419,6 +456,14 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     if (found.name === CMC_WATCH) {
       throw new Error('Cannot update CMC watch');
+    }
+
+    if (update.cronExpression) {
+      try {
+        new Job(update.cronExpression, () => {});
+      } catch (error) {
+        throw new Error('CronManager - Invalid cron expression');
+      }
     }
 
     if (update.query) {
@@ -445,6 +490,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async toggleCronConfig(id: number | string) {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     const [control, cronConfig] = await Promise.all([
       this.databaseOps.getControl(),
       this.databaseOps.findOneCronConfig({ id }),
@@ -468,6 +519,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async enableAllCronConfig() {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     const [control, cronConfigs] = await Promise.all([
       this.databaseOps.getControl(),
       this.databaseOps.findCronConfig(),
@@ -490,6 +547,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async disableAllCronConfig() {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     const [control, cronConfigs] = await Promise.all([
       this.databaseOps.getControl(),
       this.databaseOps.findCronConfig(),
@@ -512,8 +575,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   }
 
   async purgeControl() {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
+      return;
+    }
+
     const control = await this.databaseOps.getControl();
     control.replicaIds = [];
+
     try {
       const _control = await this.databaseOps.updateControl(control);
 
@@ -534,13 +604,30 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     return { success: true };
   }
 
+  async toggleControl() {
+    const control = await this.databaseOps.getControl();
+    control.enabled = !control?.enabled;
+
+    const _control = await this.databaseOps.updateControl(control);
+
+    if (!_control) {
+      this.logger.warn('CronManager - Failed to toggle CronManager');
+    }
+
+    this.logger.log(`CronManager is ${control.enabled ? 'enabled' : 'disabled'}`);
+
+    return { enabled: !!control?.enabled };
+  }
+
   /**
    * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
    * @param execution - The function to be executed
    * @warning Failure to match these names WILL lead to unexpected behavior
    */
   async handleJob(name: string, execution: JobExecution) {
-    if (!this.enabled) {
+    const isEnabled = await this.isGlobalEnabled();
+
+    if (!isEnabled) {
       return;
     }
 

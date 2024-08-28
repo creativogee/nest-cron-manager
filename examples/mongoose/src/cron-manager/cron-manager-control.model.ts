@@ -16,6 +16,9 @@ export class CronManagerControl
 {
   id: string;
 
+  @Prop({ default: true })
+  enabled: boolean;
+
   @Prop({ default: false })
   reset: boolean;
 
