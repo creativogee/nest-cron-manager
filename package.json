@@ -1,7 +1,7 @@
 {
   "name": "nest-cron-manager",
   "description": "Powerful, flexible and simple way to manage cron jobs in NestJS",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "main": "dist/index.js",
   "types": "types/index.d.ts",
   "files": [

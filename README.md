@@ -179,11 +179,6 @@ import { CreateCronConfig, CronManager, UpdateCronConfig } from 'nest-cron-manag
 export class CronManagerController {
   constructor(private readonly cronManager: CronManager) {}
 
-  @Post('cmc/purge')
-  purgeControl() {
-    return this.cronManager.purgeControl();
-  }
-
   @Post('/cron/config')
   async createCronConfig(@Body() body: CreateCronConfig) {
     return this.cronManager.createCronConfig(body);
