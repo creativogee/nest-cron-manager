@@ -195,7 +195,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled || !this.enabled) {
-        throw new Error('Cron manager is disabled');
+        throw new Error(!isEnabled ? 'Cron manager is disabled' : '');
       }
 
       const cronConfigs = await this.databaseOps.findCronConfig();
@@ -690,6 +690,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     try {
       const control = await this.databaseOps.getControl();
       control.replicaIds = [];
+      control.staleReplicas = [];
 
       try {
         const _control = await this.databaseOps.updateControl(control);
