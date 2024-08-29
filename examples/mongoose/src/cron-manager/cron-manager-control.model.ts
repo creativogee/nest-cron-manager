@@ -19,9 +19,6 @@ export class CronManagerControl
   @Prop({ default: true })
   enabled: boolean;
 
-  @Prop({ default: false })
-  reset: boolean;
-
   @Prop({ default: [] })
   replicaIds: string[];
 

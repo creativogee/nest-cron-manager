@@ -15,9 +15,6 @@ export class CronManagerControl implements CronManagerControlInterface {
   @Column({ default: true })
   enabled: boolean;
 
-  @Column({ default: false })
-  reset: boolean;
-
   @Column('jsonb', { default: [] })
   replicaIds: string[];
 

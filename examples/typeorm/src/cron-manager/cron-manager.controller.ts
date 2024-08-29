@@ -18,6 +18,11 @@ import {
 export class CronManagerController {
   constructor(private readonly cronManager: CronManager) {}
 
+  @Get('cmc')
+  getControl() {
+    return this.cronManager.getControl();
+  }
+
   @Delete('cmc')
   purgeControl() {
     return this.cronManager.purgeControl();
@@ -31,6 +36,16 @@ export class CronManagerController {
   @Post('/cron/config')
   async createCronConfig(@Body() body: CreateCronConfig) {
     return this.cronManager.createCronConfig(body);
+  }
+
+  @Put('/cron/config/enable-all')
+  async enableAllCronConfig() {
+    return this.cronManager.enableAllCronConfig();
+  }
+
+  @Put('/cron/config/disable-all')
+  async disableAllCronConfig() {
+    return this.cronManager.disableAllCronConfig();
   }
 
   @Put('/cron/config/:id')
@@ -49,15 +64,5 @@ export class CronManagerController {
   @Put('/cron/config/:id/toggle')
   async enableCronConfig(@Param('id') id: string) {
     return this.cronManager.toggleCronConfig(+id);
-  }
-
-  @Put('/cron/config/all/enable')
-  async enableAllCronConfig() {
-    return this.cronManager.enableAllCronConfig();
-  }
-
-  @Put('/cron/config/all/disable')
-  async disableAllCronConfig() {
-    return this.cronManager.disableAllCronConfig();
   }
 }
