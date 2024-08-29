@@ -22,6 +22,7 @@ export class CronManager {
   toggleCronConfig(id: number | string): Promise<{ cronConfig: any }>;
   enableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
   disableAllCronConfig(): Promise<{ cronConfigs: CronConfig[] }>;
+  getControl(): Promise<CronManagerControl>;
   purgeControl(): Promise<{ success: boolean }>;
   toggleControl(): Promise<{ enabled: boolean }>;
 

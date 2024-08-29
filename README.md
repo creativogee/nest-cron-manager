@@ -65,9 +65,6 @@ export class CronManagerControl implements CronManagerControlInterface {
   @Column({ default: true })
   enabled: boolean;
 
-  @Column({ default: false })
-  reset: boolean;
-
   @Column('jsonb', { default: [] })
   replicaIds: string[];
 
@@ -194,6 +191,7 @@ export class CronManagerController {
   // PUT /cron/config/:id/toggle - Toggle on/off a cron config
   // PUT /cron/config/disable-all - Disable all cron configs
   // PUT /cron/config/enable-all - Enable all cron configs
+  // GET /cmc - Get cron manager control
   // DELETE /cmc - Purge cron manager control
   // PATCH /cmc - Toggle cron manager control
 }

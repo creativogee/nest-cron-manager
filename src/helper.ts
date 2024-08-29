@@ -51,7 +51,11 @@ export class TypeOrmOperations implements DatabaseOps {
   async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
     const found = await this.cronManagerControlRepository
       .update({ cmcv: data.cmcv }, { ...data, cmcv: randomUUID() })
-      .then(() => this.cronManagerControlRepository.find());
+      .then((updated) => {
+        if (updated.affected) {
+          return this.cronManagerControlRepository.find();
+        }
+      });
 
     if (found?.length) {
       return found[0];
@@ -77,7 +81,7 @@ export class TypeOrmOperations implements DatabaseOps {
   async saveCronConfig(data: CronConfig): Promise<CronConfig> {
     if (data.jobType === 'query') {
       if (!this.querySecret) {
-        throw new Error('CronManager - Query secret not found');
+        throw new Error('Query secret not found');
       }
     }
     return this.cronConfigRepository.save(data);
@@ -120,11 +124,10 @@ export class MongooseOperations implements DatabaseOps {
   }
 
   async updateControl(data: CronManagerControl): Promise<CronManagerControl> {
-    return this.cronManagerControlModel.findOneAndUpdate(
-      { cmcv: data.cmcv },
-      { ...data, cmcv: randomUUID() },
-      { new: true },
-    );
+    const cmcv = data.cmcv;
+    data.cmcv = randomUUID();
+
+    return this.cronManagerControlModel.findOneAndUpdate({ cmcv }, data, { new: true });
   }
 
   async findOneCronConfig(options: any): Promise<CronConfig | null> {
@@ -184,7 +187,7 @@ export class MongooseOperations implements DatabaseOps {
   }
 
   async query(sql: string): Promise<any> {
-    throw new Error('CronManager - Raw SQL queries are not supported in Mongoose');
+    throw new Error('Raw SQL queries are not supported in Mongoose');
   }
 
   isTypeOrm(): boolean {
@@ -203,23 +206,23 @@ export const validateDeps = ({
   querySecret,
 }: CronManagerDeps) => {
   if (!cronManagerControlRepository) {
-    throw new Error('CronManager - Control repository not provided');
+    throw new Error('Control repository not provided');
   }
 
   if (['typeorm', 'mongoose'].indexOf(orm) === -1) {
-    throw new Error('CronManager - Invalid ORM type');
+    throw new Error('Invalid ORM type');
   }
 
   if (!logger) {
-    throw new Error('CronManager - Logger not provided');
+    throw new Error('Logger not provided');
   }
 
   if (!redisService) {
-    throw new Error('CronManager - Redis service not provided');
+    throw new Error('Redis service not provided');
   }
 
   if (!cronConfigRepository || !cronJobRepository) {
-    throw new Error('CronManager - Repositories not provided');
+    throw new Error('Repositories not provided');
   }
 
   let databaseOps: DatabaseOps;
@@ -231,7 +234,7 @@ export const validateDeps = ({
       !cronConfigRepository.metadata.connection ||
       !cronJobRepository.metadata.connection
     ) {
-      throw new Error('CronManager - Invalid TypeORM repositories');
+      throw new Error('Invalid TypeORM repositories');
     }
 
     databaseOps = new TypeOrmOperations({
@@ -245,7 +248,7 @@ export const validateDeps = ({
 
   if (orm === 'mongoose') {
     if (!cronConfigRepository.prototype || !cronJobRepository.prototype) {
-      throw new Error('CronManager - Invalid Mongoose repositories');
+      throw new Error('Invalid Mongoose repositories');
     }
 
     databaseOps = new MongooseOperations({
@@ -256,7 +259,7 @@ export const validateDeps = ({
   }
 
   if (!databaseOps) {
-    throw new Error('CronManager - Invalid database operations');
+    throw new Error('Invalid database operations');
   }
 
   return { databaseOps };
@@ -294,4 +297,8 @@ export const intervalToCron = (interval: string, logger?: Logger): string => {
 
   // Return the cron expression for seconds
   return `*/${value} * * * * *`;
+};
+
+export const delay = (ms: number): Promise<void> => {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 };

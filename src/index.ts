@@ -15,9 +15,9 @@ import {
   Lens as LensInterface,
   UpdateCronConfig,
 } from '../types';
-import { intervalToCron, isJSON, validateDeps } from './helper';
+import { delay, intervalToCron, isJSON, validateDeps } from './helper';
 
-const CMC_WATCH = 'cmc';
+export const CMC_WATCH = 'cmc';
 const out_cmc = (cronConfig: CronConfig) => cronConfig.name !== CMC_WATCH;
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
@@ -85,7 +85,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     this.databaseOps = deps.databaseOps;
 
-    this.initializeJobs();
+    this.prepare();
   }
 
   checkInit() {
@@ -146,27 +146,16 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private async isGlobalEnabled() {
     try {
       const control = await this.databaseOps.getControl();
-
-      if (!control && this.enabled) {
-        return true;
-      }
-
-      return control?.enabled && this.enabled;
+      return !!control?.enabled;
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
 
-  private async initializeJobs() {
+  private async prepare() {
     try {
-      const isEnabled = await this.isGlobalEnabled();
-
-      if (!isEnabled) {
-        throw new Error('CronManager is disabled');
-      }
-
       const [control, cronConfigs] = await Promise.all([
         this.databaseOps.getControl(),
         this.databaseOps.findCronConfig(),
@@ -184,16 +173,32 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }
 
       if (!cmc) {
-        const { cronConfig } = await this.createCronConfig({
+        await this.createCronConfig({
           name: CMC_WATCH,
           enabled: true,
           jobType: CronManager.JobType.QUERY,
           silent: true,
           cronExpression: this.watchTime,
         });
-
-        cronConfigs.unshift(cronConfig);
       }
+
+      await this.initializeJobs();
+    } catch (error) {
+      this.logger.warn(error.message);
+
+      return { cronConfigs: [] };
+    }
+  }
+
+  private async initializeJobs() {
+    try {
+      const isEnabled = await this.isGlobalEnabled();
+
+      if (!isEnabled || !this.enabled) {
+        throw new Error('Cron manager is disabled');
+      }
+
+      const cronConfigs = await this.databaseOps.findCronConfig();
 
       await Promise.all(cronConfigs.map((cronConfig) => this.scheduleJob(cronConfig)));
 
@@ -204,7 +209,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -237,7 +242,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -258,42 +263,45 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       if (cronConfig.jobType === CronManager.JobType.QUERY) {
         if (!cronConfig.query) {
-          this.logger.log(`Job: ${cronConfig.name} query not found`);
+          this.logger.warn(`Job: ${cronConfig.name} query not found`);
+          return;
+        }
+
+        if (!this.databaseOps?.query) {
+          this.logger.warn('Query runner not found');
           return;
         }
 
         const query = this.decryptQuery(cronConfig.query);
 
         execution = async () => this.databaseOps?.query(`${query}`);
-
-        if (!execution) {
-          this.logger.log(`Job: ${cronConfig.name} query failed to execute`);
-          return;
-        }
       }
 
       if (cronConfig.jobType === CronManager.JobType.METHOD) {
         execution = this.cronJobService?.[cronConfig.name];
+
+        if (!execution) {
+          this.logger.warn(`Job: ${cronConfig.name} method not found`);
+          return;
+        }
       }
 
       await this.handleJob(cronConfig.name, execution);
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
 
   private async resetJobs(control: CronManagerControl, retries = 0) {
-    const maxRetries = 5;
-
-    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const maxRetries = 3;
 
     try {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        throw new Error('CronManager is disabled');
+        throw new Error('Cron manager is disabled');
       }
 
       const isStale = control?.staleReplicas.includes(this.replicaId);
@@ -316,30 +324,23 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         // this is critical in case of non-unique replicaIds
         control.staleReplicas.splice(index, 1);
       }
-      let latestVersion = control.cmcv;
 
       try {
         const _control = await this.databaseOps.updateControl(control);
 
         if (!_control) {
-          this.logger.warn(
-            'CronManager - CronManagerControl' +
-              `${this.orm === 'mongoose' ? ' model ' : ' repository '}` +
-              'not found',
-          );
-          return;
+          throw new Error();
         }
       } catch (error) {
         if (retries < maxRetries) {
-          const backoffTime = Math.pow(2, retries) * 1000; // Exponential backoff
-          this.logger.log(`Failed to reset jobs; Retrying in ${backoffTime / 1000} seconds...`);
+          const backoffTime = Math.pow(2, retries) * 1000;
+          this.logger.warn(`Failed to reset jobs; Retrying in ${backoffTime / 1000} seconds...`);
 
           await delay(backoffTime);
+          const control = await this.getControl();
           await this.resetJobs(control, retries + 1);
-        }
-
-        if (retries >= maxRetries) {
-          this.logger.error('Max retries reached. Failed to reset jobs.');
+        } else {
+          this.logger.warn('Maximum retries reached. Failed to reset jobs.');
         }
 
         return;
@@ -351,37 +352,33 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
 
   private async startJob(name: string) {
-    try {
-      const cronConfig = await this.databaseOps.findOneCronConfig({ name });
+    const cronConfig = await this.databaseOps.findOneCronConfig({ name });
 
-      if (!cronConfig?.enabled || cronConfig?.deletedAt) {
-        throw new Error();
-      }
-
-      let cronJob: CronJob;
-
-      if (!cronConfig.silent) {
-        cronJob = await this.databaseOps.createCronJob({
-          config: cronConfig,
-          startedAt: new Date(),
-        });
-      }
-
-      const context = JSON.parse(cronConfig?.context || '{}');
-      cronJob.config = cronConfig;
-
-      return { job: cronJob, context, silent: cronConfig?.silent };
-    } catch (error) {
-      if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
-      }
+    if (!cronConfig?.enabled || cronConfig?.deletedAt) {
+      throw new Error();
     }
+
+    let cronJob: CronJob | null = null;
+
+    if (!cronConfig.silent) {
+      cronJob = await this.databaseOps.createCronJob({
+        config: cronConfig,
+        startedAt: new Date(),
+      });
+    }
+
+    const context = JSON.parse(cronConfig?.context || '{}');
+    if (cronJob) {
+      cronJob.config = cronConfig;
+    }
+
+    return { job: cronJob, context, silent: cronConfig?.silent };
   }
 
   private async endJob({ job, status, result }: EndJob) {
@@ -393,35 +390,39 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       await this.databaseOps.saveCronJob(job);
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
 
-  private async expireJobs(control?: CronManagerControl) {
+  private async expireJobs(control?: CronManagerControl, retries = 0) {
+    const maxRetries = 3;
+
     if (!control) {
       this.resetJobs(control);
     }
 
     if (control) {
       control.staleReplicas = control.replicaIds;
-      let latestVersion = control.cmcv;
 
       try {
         const _control = await this.databaseOps.updateControl(control);
-
         if (!_control) {
-          throw new Error(
-            'CronManager - CronManagerControl' +
-              `${this.orm === 'mongoose' ? ' model ' : ' repository '}` +
-              'not found',
-          );
+          throw new Error('Failed to expire jobs');
         }
       } catch (error) {
-        const latestControl = await this.databaseOps.getControl();
-        latestVersion = latestControl.cmcv;
-        control.cmcv = latestVersion;
-        await this.expireJobs(control);
+        if (retries < maxRetries) {
+          const backoffTime = Math.pow(2, retries) * 1000;
+          this.logger.warn(`Failed to expire jobs; Retrying in ${backoffTime / 1000} seconds...`);
+
+          await delay(backoffTime);
+          const recentControl = await this.databaseOps.getControl();
+          recentControl.staleReplicas = recentControl.replicaIds;
+          await this.expireJobs(recentControl, retries + 1);
+        } else {
+          this.logger.warn('Maximum retries reached. Failed to update control.');
+          throw error;
+        }
       }
     }
   }
@@ -465,18 +466,18 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        return;
+        throw new Error('Cron manager is disabled');
       }
 
-      if (data.query) {
+      if (data?.query) {
         data.query = this.encryptQuery(data.query);
       }
 
-      if (data.cronExpression) {
+      if (data?.cronExpression) {
         try {
           new Job(data.cronExpression, () => {});
         } catch (error) {
-          throw new Error('CronManager - Invalid cron expression');
+          throw new Error('Invalid cron expression');
         }
       }
 
@@ -485,6 +486,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }
 
       const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
+      this.logger.log(`Job: ${cronConfig.name} created`);
 
       if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
         const control = await this.databaseOps.getControl();
@@ -495,7 +497,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return { cronConfig };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -505,7 +507,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        throw new Error('CronManager is disabled');
+        throw new Error('Cron manager is disabled');
       }
 
       const [control, found] = await Promise.all([
@@ -514,18 +516,18 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       ]);
 
       if (!found) {
-        throw new Error('CronConfig not found');
+        throw new Error('Cron config not found');
       }
 
       if (found.name === CMC_WATCH) {
-        throw new Error('Cannot update CMC watch');
+        throw new Error('Cannot update cmc watch');
       }
 
       if (update.cronExpression) {
         try {
           new Job(update.cronExpression, () => {});
         } catch (error) {
-          throw new Error('CronManager - Invalid cron expression');
+          throw new Error('Invalid cron expression');
         }
       }
 
@@ -536,6 +538,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       Object.assign(found, update);
 
       const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
+      this.logger.log(`Job: ${cronConfig.name} updated`);
 
       const jobType = update?.jobType ?? cronConfig.jobType;
 
@@ -546,7 +549,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return { cronConfig };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -558,7 +561,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return cronConfigs.filter(out_cmc);
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -568,7 +571,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        throw new Error('CronManager is disabled');
+        throw new Error('Cron manager is disabled');
       }
 
       const [control, cronConfig] = await Promise.all([
@@ -576,24 +579,25 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         this.databaseOps.findOneCronConfig({ id }),
       ]);
 
-      if (cronConfig.name === CMC_WATCH) {
-        throw new Error('Cannot disable CMC watch');
+      if (!cronConfig) {
+        throw new Error('Cron config not found');
       }
 
-      if (!cronConfig) {
-        throw new Error('CronConfig not found');
+      if (cronConfig?.name === CMC_WATCH) {
+        throw new Error('Cannot toggle cmc watch');
       }
 
       cronConfig.enabled = !cronConfig.enabled;
 
       await this.databaseOps.saveCronConfig(cronConfig);
+      this.logger.log(`Job: ${cronConfig.name} ${cronConfig.enabled ? 'enabled' : 'disabled'}`);
 
       await this.expireJobs(control);
 
       return { cronConfig };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -603,7 +607,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        return;
+        throw new Error('Cron manager is disabled');
       }
 
       const [control, cronConfigs] = await Promise.all([
@@ -616,6 +620,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           if (!cronConfig.enabled) {
             cronConfig.enabled = true;
             await this.databaseOps.saveCronConfig(cronConfig);
+            this.logger.log(`Job: ${cronConfig.name} enabled`);
           }
         }),
       );
@@ -627,7 +632,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -637,7 +642,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        return;
+        throw new Error('Cron manager is disabled');
       }
 
       const [control, cronConfigs] = await Promise.all([
@@ -650,6 +655,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           if (cronConfig.enabled && cronConfig.name !== CMC_WATCH) {
             cronConfig.enabled = false;
             await this.databaseOps.saveCronConfig(cronConfig);
+            this.logger.log(`Job: ${cronConfig.name} disabled`);
           }
         }),
       );
@@ -661,23 +667,27 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
+      }
+    }
+  }
+
+  async getControl() {
+    try {
+      const control = await this.databaseOps.getControl();
+
+      return control;
+    } catch (error) {
+      if (error?.message) {
+        this.logger.warn(error.message);
       }
     }
   }
 
   async purgeControl(retries = 0) {
-    const maxRetries = 5;
-
-    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const maxRetries = 3;
 
     try {
-      const isEnabled = await this.isGlobalEnabled();
-
-      if (!isEnabled) {
-        throw new Error('CronManager is disabled');
-      }
-
       const control = await this.databaseOps.getControl();
       control.replicaIds = [];
 
@@ -685,33 +695,26 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         const _control = await this.databaseOps.updateControl(control);
 
         if (!_control) {
-          this.logger.warn(
-            'CronManager - CronManagerControl' +
-              `${this.orm === 'mongoose' ? ' model ' : ' repository '}` +
-              'not found',
-          );
-          return;
+          throw new Error();
         }
       } catch (error) {
         if (retries < maxRetries) {
           const backoffTime = Math.pow(2, retries) * 1000;
-          this.logger.log(`Failed to purge control; Retrying in ${backoffTime / 1000} seconds...`);
+          this.logger.warn(`Failed to purge control; Retrying in ${backoffTime / 1000} seconds...`);
 
           await delay(backoffTime);
           await this.purgeControl(retries + 1);
-        }
-
-        if (retries >= maxRetries) {
-          this.logger.error('Max retries reached. Failed to purge control.');
+        } else {
+          this.logger.warn('Maximum retries reached. Failed to purge control.');
         }
         return;
       }
-      // reinitialize jobs
-      await this.initializeJobs();
+
+      await this.prepare();
       return { success: true };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -724,15 +727,15 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const _control = await this.databaseOps.updateControl(control);
 
       if (!_control) {
-        this.logger.warn('CronManager - Failed to toggle CronManager');
+        throw new Error();
       }
 
-      this.logger.log(`CronManager is ${control.enabled ? 'enabled' : 'disabled'}`);
+      this.logger.log(`Cron manager is ${control.enabled ? 'enabled' : 'disabled'}`);
 
       return { enabled: !!control?.enabled };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
@@ -747,7 +750,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const isEnabled = await this.isGlobalEnabled();
 
       if (!isEnabled) {
-        throw new Error('CronManager is disabled');
+        return;
       }
 
       let status: EndJob['status'];
@@ -797,7 +800,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         try {
           result = await execution(context, lens);
 
-          if (result && job.config.jobType === CronManager.JobType.METHOD) {
+          if (result && job?.config?.jobType === CronManager.JobType.METHOD) {
             switch (true) {
               case result instanceof Lens:
                 result = result.getFrames();
@@ -827,7 +830,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         }
       } catch (error) {
         if (error.message) {
-          this.logger.log(error.message);
+          this.logger.warn(error.message);
         }
       } finally {
         if (status) {
@@ -852,7 +855,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(`CronManger -  ${error.message}`);
+        this.logger.warn(error.message);
       }
     }
   }
