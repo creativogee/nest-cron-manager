@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CronManager } from 'nest-cron-manager';
+import { v4 as uuidv4 } from 'uuid';
 import { CacheModule } from '../cache/cache.module';
 import { CacheService } from '../cache/cache.service';
 import { CronConfig } from './cron-config.model';
@@ -35,8 +36,8 @@ import { CronManagerController } from './cron-manager.controller';
         cronJobService: CronJobService,
       ) =>
         new CronManager({
+          replicaId: uuidv4(),
           enabled: configService.get('app.cronManager.enabled'),
-          replicaId: configService.get('app.cronManager.replicaId'),
           querySecret: configService.get('app.cronManager.querySecret'),
           logger: new Logger(CronManager.name),
           cronManagerControlRepository: cronManagerControlRepository,

@@ -85,7 +85,9 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
     this.databaseOps = deps.databaseOps;
 
-    this.prepare();
+    this.prepare().then(() => {
+      this.logger.log(`Initialized with replicaId: ${this.replicaId}`);
+    });
   }
 
   checkInit() {
@@ -172,7 +174,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         await this.databaseOps.updateControl(control);
       }
 
-      if (!cmc) {
+      if (cmc) {
+        cmc.cronExpression = this.watchTime;
+        await this.databaseOps.saveCronConfig(cmc);
+      } else {
         await this.createCronConfig({
           name: CMC_WATCH,
           enabled: true,
@@ -247,13 +252,22 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
   }
 
+  // Guranteed to be called by the cmc at watch time
   private async executeJob(cronConfig: CronConfig) {
     try {
       let execution: JobExecution;
 
       const control = await this.databaseOps.getControl();
 
-      if (control?.staleReplicas.length) {
+      // If replicaId is not registered with control, register it
+      if (!control.replicaIds.includes(this.replicaId)) {
+        control.replicaIds.push(this.replicaId);
+        // Also add to stale replicas to immediately trigger a reset
+        // just in case it was already behind other replicas
+        control.staleReplicas.push(this.replicaId);
+      }
+
+      if (control.staleReplicas.length) {
         await this.resetJobs(control);
       }
 
