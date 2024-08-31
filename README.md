@@ -368,7 +368,7 @@ export class SomeService {
   async doSomething() {
     await this.cronManager.handleJob(
       'doSomething',
-      async (context: Record<string, any>, config: Record<string, any>, lens: Lens) => {
+      async (context: Record<string, any>, lens: Lens) => {
         // Variables here
 
         // Perform an operation

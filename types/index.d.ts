@@ -306,7 +306,7 @@ export interface JobContext {
 interface DatabaseOps {
   findOneCronConfig(options: any): Promise<CronConfig | null>;
   findCronConfig(options?: any): Promise<CronConfig[]>;
-  createCronConfig(data: CreateCronConfig): CronConfig;
+  createCronConfig(data: CreateCronConfig): Promise<CronConfig>;
   saveCronConfig(data: CreateCronConfig): Promise<CronConfig>;
   createCronJob(data: any): Promise<CronJob>;
   saveCronJob(data: any): Promise<any>;

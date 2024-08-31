@@ -74,7 +74,7 @@ export class TypeOrmOperations implements DatabaseOps {
     });
   }
 
-  createCronConfig(data: CreateCronConfig): CronConfig {
+  async createCronConfig(data: CreateCronConfig): Promise<CronConfig> {
     return this.cronConfigRepository.create(data);
   }
 
@@ -87,7 +87,7 @@ export class TypeOrmOperations implements DatabaseOps {
     return this.cronConfigRepository.save(data);
   }
 
-  createCronJob(data: any): any {
+  async createCronJob(data: any): Promise<CronJob> {
     return this.cronJobRepository.create(data);
   }
 
@@ -148,7 +148,7 @@ export class MongooseOperations implements DatabaseOps {
     return this.cronConfigModel.find(options).exec();
   }
 
-  createCronConfig(data: CreateCronConfig): CronConfig {
+  async createCronConfig(data: CreateCronConfig): Promise<CronConfig> {
     return this.cronConfigModel.create(data);
   }
 
@@ -258,10 +258,6 @@ export const validateDeps = ({
     });
   }
 
-  if (!databaseOps) {
-    throw new Error('Invalid database operations');
-  }
-
   return { databaseOps };
 };
 
@@ -283,11 +279,6 @@ export const intervalToCron = (interval: string, logger?: Logger): string => {
   }
 
   let value = parseInt(match[1], 10);
-  const unit = match[2] || 's'; // Default to 's' if unit is not provided
-
-  if (unit !== 's') {
-    logger?.warn('Invalid unit provided. Defaulting to seconds.');
-  }
 
   // Ensure the value does not exceed 5 seconds
   if (value > 5) {

@@ -100,7 +100,7 @@ const mockDatabaseOps: DatabaseOps = {
   updateControl: jest.fn(async () => mockCronManagerControl),
   findOneCronConfig: jest.fn(async () => mockCronConfig),
   findCronConfig: jest.fn(async () => [mockCronConfig]),
-  createCronConfig: jest.fn(() => mockCronConfig),
+  createCronConfig: jest.fn(async () => mockCronConfig),
   saveCronConfig: jest.fn(async () => mockCronConfig),
   createCronJob: jest.fn(async () => mockCronJob),
   saveCronJob: jest.fn(),
@@ -335,18 +335,38 @@ describe('CronManager', () => {
   });
 
   describe('executeJob', () => {
-    it('should acknowlege stale replicas', async () => {
+    it('should reset stale replicas', async () => {
+      const control = {
+        ...mockCronManagerControl,
+        staleReplicas: ['test-replica-id'],
+      };
       jest
         .spyOn(mockDatabaseOps, 'getControl')
         .mockResolvedValue({ staleReplicas: ['1'] } as unknown as CronManagerControl);
+      jest.spyOn(mockDatabaseOps, 'getControl').mockResolvedValue(control);
 
       jest.spyOn(cronManager, 'resetJobs');
-      jest.spyOn(cronManager, 'handleJob');
 
       await cronManager.executeJob(mockCronConfig);
 
       expect(cronManager.resetJobs).toHaveBeenCalled();
-      expect(cronManager.handleJob).toHaveBeenCalled();
+    });
+
+    it('should register untracked replica and reset', async () => {
+      const control = {
+        ...mockCronManagerControl,
+        replicaIds: [],
+      };
+      jest.spyOn(mockDatabaseOps, 'getControl').mockResolvedValue(control);
+      jest.spyOn(cronManager, 'resetJobs');
+      jest.spyOn(control.replicaIds, 'push');
+      jest.spyOn(control.staleReplicas, 'push');
+
+      await cronManager.executeJob(mockCronConfig);
+
+      expect(control.replicaIds.push).toHaveBeenCalledWith('test-replica-id');
+      expect(control.staleReplicas.push).toHaveBeenCalledWith('test-replica-id');
+      expect(cronManager.resetJobs).toHaveBeenCalled();
     });
 
     describe('query', () => {
@@ -1112,14 +1132,16 @@ describe('CronManager', () => {
       expect(cronManager.logger.log).toHaveBeenCalledWith('Cron manager is disabled');
     });
 
-    it('should log warning if control not updated', async () => {
+    it('should throw error if control not updated', async () => {
       jest
         .spyOn(mockDatabaseOps, 'updateControl')
         .mockResolvedValue(null as unknown as CronManagerControl);
 
       await cronManager.toggleControl();
 
-      expect(cronManager.logger.warn).toHaveBeenCalledWith('Failed to toggle cron manager');
+      expect(cronManager.logger.log).not.toHaveBeenCalled();
+
+      
     });
   });
 

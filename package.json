@@ -1,7 +1,7 @@
 {
   "name": "nest-cron-manager",
   "description": "Powerful, flexible and simple way to manage cron jobs in NestJS",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "main": "dist/index.js",
   "types": "types/index.d.ts",
   "files": [
@@ -9,6 +9,12 @@
     "types"
   ],
   "author": "Gbenga Omowole <omowole.gbenga@gmail.com>",
+  "maintainers": [
+    {
+      "name": "Gbenga Omowole",
+      "email": "omowole.gbenga@gmail.com"
+    }
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
