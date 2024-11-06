@@ -74,6 +74,12 @@ export interface CronManagerControl {
   id: number | string;
 
   /**
+   * A flag indicating whether the cron manager is in debug mode.
+   * When set to `true`, the cron manager will log additional information.
+   */
+  logLevel?: string;
+
+  /**
    * A list of replica IDs that are considered stale and require resetting.
    */
   staleReplicas: string[];
@@ -302,6 +308,9 @@ export interface JobContext {
   distributed?: boolean;
   ttl?: number;
   batch?: number;
+  batchSize?: number;
+  replicas?: number;
+  concurrent?: boolean;
   maxRetries?: number;
   retryDelay?: number;
 }

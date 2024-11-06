@@ -37,6 +37,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
   private readonly cronJobService: any;
   private databaseOps: DatabaseOps;
   private readonly cronJobs: Map<string, Job> = new Map();
+  private logLevel: string = 'info';
+  private readonly logLevels = {
+    error: 0,
+    warn: 1,
+    info: 2,
+    debug: 3,
+  };
 
   static readonly JobType = {
     INLINE: 'inline',
@@ -68,7 +75,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     this.entityManager = entityManager;
     this.cronJobService = cronJobService;
     this.enabled = enabled;
-    this.watchTime = intervalToCron(watchTime, this.logger);
+    this.watchTime = intervalToCron(watchTime, this.log);
     this.querySecret = querySecret;
   }
 
@@ -88,7 +95,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     this.databaseOps = deps.databaseOps;
 
     this.prepare().then(() => {
-      this.logger.log(`Initialized with replicaId: ${this.replicaId}`);
+      this.log.info(`Initialized w/ replicaId: ${this.replicaId}`);
     });
   }
 
@@ -153,7 +160,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return !!control?.enabled;
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -191,7 +198,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       await this.initializeJobs();
     } catch (error) {
-      this.logger.warn(error.message);
+      this.log.warn(error.message);
 
       return { cronConfigs: [] };
     }
@@ -213,10 +220,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
 
-      this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
+      this.log.info('Total jobs scheduled: ' + (totalEnabledJobs - 1));
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -242,14 +249,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         this.cronJobs.set(cronConfig.name, job);
 
         if (cronConfig.name !== CMC_WATCH) {
-          this.logger.log(
-            `Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`,
-          );
+          this.log.info(`Job: ${cronConfig.name} scheduled to run at ${cronConfig.cronExpression}`);
         }
       }
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -260,6 +265,8 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       let execution: JobExecution;
 
       const control = await this.databaseOps.getControl();
+
+      this.logLevel = control?.logLevel || 'info';
 
       // If replicaId is not registered with control, register it
       if (!control.replicaIds.includes(this.replicaId)) {
@@ -279,12 +286,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
       if (cronConfig.jobType === CronManager.JobType.QUERY) {
         if (!cronConfig.query) {
-          this.logger.warn(`Job: ${cronConfig.name} query not found`);
+          this.log.warn(`Job: ${cronConfig.name} query not found`);
           return;
         }
 
         if (!this.databaseOps?.query) {
-          this.logger.warn('Query runner not found');
+          this.log.warn('Query runner not found');
           return;
         }
 
@@ -297,7 +304,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         execution = this.cronJobService?.[cronConfig.name];
 
         if (!execution) {
-          this.logger.warn(`Job: ${cronConfig.name} method not found`);
+          this.log.warn(`Job: ${cronConfig.name} method not found`);
           return;
         }
       }
@@ -305,7 +312,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       await this.handleJob(cronConfig.name, execution);
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -350,13 +357,13 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       } catch (error) {
         if (retries < maxRetries) {
           const backoffTime = Math.pow(2, retries) * 1000;
-          this.logger.warn(`Failed to reset jobs; Retrying in ${backoffTime / 1000} seconds...`);
+          this.log.warn(`Failed to reset jobs; Retrying in ${backoffTime / 1000} seconds...`);
 
           await delay(backoffTime);
           const control = await this.getControl();
           await this.resetJobs(control, retries + 1);
         } else {
-          this.logger.warn('Maximum retries reached. Failed to reset jobs.');
+          this.log.warn('Maximum retries reached. Failed to reset jobs.');
         }
 
         return;
@@ -365,10 +372,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       const updatedCronConfigs = await this.databaseOps.findCronConfig();
       const totalEnabledJobs = this.getTotalEnabledJobs(updatedCronConfigs);
 
-      this.logger.log('Total jobs scheduled: ' + (totalEnabledJobs - 1));
+      this.log.info('Total jobs scheduled: ' + (totalEnabledJobs - 1));
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -406,7 +413,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       await this.databaseOps.saveCronJob(job);
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -429,14 +436,14 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       } catch (error) {
         if (retries < maxRetries) {
           const backoffTime = Math.pow(2, retries) * 1000;
-          this.logger.warn(`Failed to expire jobs; Retrying in ${backoffTime / 1000} seconds...`);
+          this.log.warn(`Failed to expire jobs; Retrying in ${backoffTime / 1000} seconds...`);
 
           await delay(backoffTime);
           const recentControl = await this.databaseOps.getControl();
           recentControl.staleReplicas = recentControl.replicaIds;
           await this.expireJobs(recentControl, retries + 1);
         } else {
-          this.logger.warn('Maximum retries reached. Failed to update control.');
+          this.log.warn('Maximum retries reached. Failed to update control.');
           throw error;
         }
       }
@@ -502,7 +509,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       }
 
       const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(data);
-      this.logger.log(`Job: ${cronConfig.name} created`);
+      this.log.info(`Job: ${cronConfig.name} created`);
 
       if ([CronManager.JobType.QUERY, CronManager.JobType.METHOD].includes(data.jobType)) {
         const control = await this.databaseOps.getControl();
@@ -513,7 +520,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return { cronConfig };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -554,7 +561,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       Object.assign(found, update);
 
       const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
-      this.logger.log(`Job: ${cronConfig.name} updated`);
+      this.log.info(`Job: ${cronConfig.name} updated`);
 
       const jobType = update?.jobType ?? cronConfig.jobType;
 
@@ -565,7 +572,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return { cronConfig };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -577,7 +584,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return cronConfigs.filter(out_cmc);
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -606,14 +613,14 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       cronConfig.enabled = !cronConfig.enabled;
 
       await this.databaseOps.saveCronConfig(cronConfig);
-      this.logger.log(`Job: ${cronConfig.name} ${cronConfig.enabled ? 'enabled' : 'disabled'}`);
+      this.log.info(`Job: ${cronConfig.name} ${cronConfig.enabled ? 'enabled' : 'disabled'}`);
 
       await this.expireJobs(control);
 
       return { cronConfig };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -636,7 +643,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           if (!cronConfig.enabled) {
             cronConfig.enabled = true;
             await this.databaseOps.saveCronConfig(cronConfig);
-            this.logger.log(`Job: ${cronConfig.name} enabled`);
+            this.log.info(`Job: ${cronConfig.name} enabled`);
           }
         }),
       );
@@ -648,7 +655,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -671,7 +678,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           if (cronConfig.enabled && cronConfig.name !== CMC_WATCH) {
             cronConfig.enabled = false;
             await this.databaseOps.saveCronConfig(cronConfig);
-            this.logger.log(`Job: ${cronConfig.name} disabled`);
+            this.log.info(`Job: ${cronConfig.name} disabled`);
           }
         }),
       );
@@ -683,7 +690,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -695,7 +702,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return control;
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -717,12 +724,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       } catch (error) {
         if (retries < maxRetries) {
           const backoffTime = Math.pow(2, retries) * 1000;
-          this.logger.warn(`Failed to purge control; Retrying in ${backoffTime / 1000} seconds...`);
+          this.log.warn(`Failed to purge control; Retrying in ${backoffTime / 1000} seconds...`);
 
           await delay(backoffTime);
           await this.purgeControl(retries + 1);
         } else {
-          this.logger.warn('Maximum retries reached. Failed to purge control.');
+          this.log.warn('Maximum retries reached. Failed to purge control.');
         }
         return;
       }
@@ -731,7 +738,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       return { success: true };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
@@ -747,15 +754,57 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         throw new Error();
       }
 
-      this.logger.log(`Cron manager is ${control.enabled ? 'enabled' : 'disabled'}`);
+      this.log.info(`Cron manager is ${control.enabled ? 'enabled' : 'disabled'}`);
 
       return { enabled: !!control?.enabled };
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }
+
+  private log = {
+    error: (message: string) => this.logMessage('error', message),
+    warn: (message: string) => this.logMessage('warn', message),
+    info: (message: string) => this.logMessage('info', message),
+    debug: (message: string) => this.logMessage('debug', message),
+  };
+
+  private logMessage(level: string, message: string) {
+    if (this.logLevels[level] <= this.logLevels[this.logLevel]) {
+      switch (level) {
+        case 'error':
+          this.logger.error(message);
+          break;
+        case 'warn':
+          this.logger.warn(message);
+          break;
+        case 'info':
+          this.logger.log(message);
+          break;
+        case 'debug':
+          this.logger.debug(message);
+          break;
+        default:
+          this.logger.log(message);
+          break;
+      }
+    }
+  }
+
+  private readonly releaseLock = async (lockKey: string, lockValue: number) => {
+    const redis: Redis = this.redisService.getClient();
+    const script = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+
+    await redis.eval(script, 1, lockKey, lockValue);
+  };
 
   /**
    * @param name - Must match exactly the name of the caller function in the CronJobService which must also match exactly the name of the cronConfig
@@ -774,60 +823,86 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       let result: any;
 
       const redis: Redis = this.redisService.getClient();
+      let replicas: number = 1;
       const lockKey = `cron-lock-${name}`;
-      const lockValue = Date.now().toString();
+      let lockValue: number = 1;
+      let concurrent: boolean;
       let acquiredLock: string;
 
       try {
         const startedJob = await this.startJob(name);
 
-        const { job, context, silent } = startedJob || {};
+        const { job, context: staticContext, silent } = startedJob || {};
 
-        // Here, if job is falsy it can only be because it's a dry run
-        // If it's not a dry run, we throw an error
         if (!job && !silent) {
           throw new Error(`Job: ${name}; Failed to start`);
         }
 
+        // Pull dynamic context from Redis if it exists
+        let context = staticContext;
+        const dynamicContext = await redis.get(`context-${name}`);
+        if (dynamicContext) {
+          context = JSON.parse(dynamicContext);
+        } else {
+          // Dump static context to Redis
+          await redis.set(`context-${name}`, JSON.stringify(staticContext));
+        }
+
+        replicas = context.replicas;
+
         let startMessage = `Job: ${name}; Started - Success`;
 
         if (context?.distributed) {
-          // Implement distributed locking with retry mechanism
-          const ttl = context?.ttl || 29;
-          const maxRetries = context?.maxRetries || 5;
-          const retryDelay = context?.retryDelay || 6;
+          const ttl = context?.ttl || 30;
+          const maxRetries = context?.maxRetries || 3;
+          const retryDelay = context?.retryDelay || 3;
+          concurrent = context?.concurrent || false;
 
-          // Try to acquire the lock with retries
+          // if concurrent is falsy, lockValue is always 1
+          // meaning only one instance of the job can run at a time (sequential)
+          if (concurrent) {
+            lockValue = await redis.incr(`batch-${name}`);
+          }
+
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            acquiredLock = await redis.set(
-              lockKey,
-              lockValue,
-              'PX', // Set the expiration in milliseconds
-              ttl * 1000,
-              'NX', // Set the lock only if it doesn't exist
-            );
+            acquiredLock = await redis.set(lockKey, lockValue, 'PX', ttl * 1000, 'NX');
 
-            if (acquiredLock) {
-              startMessage = `Acquired lock for job: ${name} on attempt ${attempt}; Started - Success`;
+            if (acquiredLock && !concurrent) {
+              this.log.debug(`Acquired lock for job: ${name} on attempt ${attempt}`);
+              startMessage = `Job: ${name}; Started - Success`;
+              break;
+            }
+
+            if (acquiredLock && concurrent) {
+              startMessage = `Job: ${name}; Started - Success (Batch ${lockValue})`;
+              this.log.debug(`Acquired lock for job: ${name} on attempt ${attempt}`);
+              context.batch = lockValue;
+              await this.releaseLock(lockKey, lockValue);
+              // Update context in Redis
+              await redis.set(`context-${name}`, JSON.stringify(context));
+
               break;
             }
 
             if (attempt < maxRetries) {
-              this.logger.log(
+              this.log.debug(
                 `Job: ${name}; Lock acquisition attempt ${attempt} failed. Retrying in ${retryDelay}s...`,
               );
+
               await delay(retryDelay * 1000);
             }
           }
 
-          // If we still couldn't acquire the lock after all retries
           if (!acquiredLock) {
-            this.logger.warn(`Job: ${name}; Failed to acquire lock after ${maxRetries} attempts`);
+            this.log.debug(`Failed to acquire lock for job: ${name} after ${maxRetries} attempts`);
             return;
           }
         }
 
-        this.logger.log(startMessage);
+        this.log.info(startMessage);
+        if (concurrent) {
+          this.log.debug(`Release lock for job: ${name}`);
+        }
 
         const lens: LensInterface = new Lens();
 
@@ -863,32 +938,29 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         }
       } catch (error) {
         if (error.message) {
-          this.logger.warn(error.message);
+          this.log.warn(error.message);
         }
       } finally {
         if (status) {
           let endMessage = `Job: ${name}; Ended - ${status}`;
 
-          if (acquiredLock) {
-            // Release the lock only if we still own it
-            const script = `
-            if redis.call("get", KEYS[1]) == ARGV[1] then
-              return redis.call("del", KEYS[1])
-            else
-              return 0
-            end
-          `;
-            await redis.eval(script, 1, lockKey, lockValue);
+          if (acquiredLock && !concurrent) {
+            this.releaseLock(lockKey, lockValue);
 
-            endMessage = `Released lock for job: ${name}; Ended - ${status}`;
+            endMessage = `Released lock for job: ${name}; Ended - ${status} (Batch ${lockValue})`;
           }
 
-          this.logger.log(endMessage);
+          if (acquiredLock && concurrent && lockValue >= replicas) {
+            await redis.del(`batch-${name}`);
+            await redis.del(`context-${name}`);
+          }
+
+          this.log.info(endMessage);
         }
       }
     } catch (error) {
       if (error?.message) {
-        this.logger.warn(error.message);
+        this.log.warn(error.message);
       }
     }
   }

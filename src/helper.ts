@@ -1,5 +1,5 @@
-import { Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { CronManager } from 'src';
 import {
   CreateCronConfig,
   CronConfig,
@@ -270,11 +270,11 @@ export const isJSON = (str: string): boolean => {
   }
 };
 
-export const intervalToCron = (interval: string, logger?: Logger): string => {
+export const intervalToCron = (interval: string, log?: CronManager['log']): string => {
   // Updated regex to match numbers with optional 's' for seconds
   const match = /^(\d+)(s?)$/.exec(interval);
   if (!match) {
-    logger?.warn('Invalid interval format. Defaulting to 5 seconds.');
+    log?.warn('Invalid interval format. Defaulting to 5 seconds.');
     return '*/5 * * * * *';
   }
 
@@ -282,7 +282,7 @@ export const intervalToCron = (interval: string, logger?: Logger): string => {
 
   // Ensure the value does not exceed 5 seconds
   if (value > 5) {
-    logger?.warn('Interval exceeds 5 seconds. Falling back to 5 seconds.');
+    log?.warn('Interval exceeds 5 seconds. Falling back to 5 seconds.');
     value = 5;
   }
 
