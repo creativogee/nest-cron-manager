@@ -1,6 +1,5 @@
 <h1 align="center">
   nest-cron-manager
-  
 </h1>
 
 <p align="center">

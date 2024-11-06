@@ -1,6 +1,7 @@
 import { OnModuleInit } from '@nestjs/common';
 import { CronJob as Job } from 'cron';
 import crypto from 'crypto-js';
+import { Redis } from 'ioredis';
 import {
   CreateCronConfig,
   CronConfig,
@@ -11,6 +12,7 @@ import {
   DatabaseOps,
   EndJob,
   Frame,
+  JobContext,
   JobExecution,
   Lens as LensInterface,
   UpdateCronConfig,
@@ -21,20 +23,20 @@ export const CMC_WATCH = 'cmc';
 const out_cmc = (cronConfig: CronConfig) => cronConfig.name !== CMC_WATCH;
 
 export class CronManager implements CronManagerInterface, OnModuleInit {
-  private replicaId: string;
-  private logger: any;
-  private cronManagerControlRepository: any;
-  private cronConfigRepository: any;
-  private cronJobRepository: any;
-  private redisService: any;
-  private orm: 'typeorm' | 'mongoose';
-  private watchTime: string;
-  private enabled: boolean;
-  private querySecret: string;
-  private entityManager: any;
-  private cronJobService: any;
+  private readonly replicaId: string;
+  private readonly logger: any;
+  private readonly cronManagerControlRepository: any;
+  private readonly cronConfigRepository: any;
+  private readonly cronJobRepository: any;
+  private readonly redisService: any;
+  private readonly orm: 'typeorm' | 'mongoose';
+  private readonly watchTime: string;
+  private readonly enabled: boolean;
+  private readonly querySecret: string;
+  private readonly entityManager: any;
+  private readonly cronJobService: any;
   private databaseOps: DatabaseOps;
-  private cronJobs: Map<string, Job> = new Map();
+  private readonly cronJobs: Map<string, Job> = new Map();
 
   static readonly JobType = {
     INLINE: 'inline',
@@ -387,7 +389,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       });
     }
 
-    const context = JSON.parse(cronConfig?.context || '{}');
+    const context = JSON.parse(cronConfig?.context || '{}') as JobContext;
     if (cronJob) {
       cronJob.config = cronConfig;
     }
@@ -771,7 +773,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       let status: EndJob['status'];
       let result: any;
 
-      const redis = this.redisService.getClient();
+      const redis: Redis = this.redisService.getClient();
       const lockKey = `cron-lock-${name}`;
       const lockValue = Date.now().toString();
       let acquiredLock: string;
@@ -789,23 +791,40 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 
         let startMessage = `Job: ${name}; Started - Success`;
 
-        if (context.distributed) {
-          // Implement distributed locking
-          const ttl = context?.ttl || 30;
+        if (context?.distributed) {
+          // Implement distributed locking with retry mechanism
+          const ttl = context?.ttl || 29;
+          const maxRetries = context?.maxRetries || 5;
+          const retryDelay = context?.retryDelay || 6;
 
-          // Try to acquire the lock
-          acquiredLock = await redis.set(
-            lockKey,
-            lockValue,
-            'PX', // Set the expiration in milliseconds
-            ttl * 1000,
-            'NX', // Set the lock only if it doesn't exist
-          );
+          // Try to acquire the lock with retries
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            acquiredLock = await redis.set(
+              lockKey,
+              lockValue,
+              'PX', // Set the expiration in milliseconds
+              ttl * 1000,
+              'NX', // Set the lock only if it doesn't exist
+            );
 
-          // If we couldn't acquire the lock, it means another instance is already running
-          if (!acquiredLock) return;
+            if (acquiredLock) {
+              startMessage = `Acquired lock for job: ${name} on attempt ${attempt}; Started - Success`;
+              break;
+            }
 
-          startMessage = `Acquired lock for job: ${name}; Started - Success`;
+            if (attempt < maxRetries) {
+              this.logger.log(
+                `Job: ${name}; Lock acquisition attempt ${attempt} failed. Retrying in ${retryDelay}s...`,
+              );
+              await delay(retryDelay * 1000);
+            }
+          }
+
+          // If we still couldn't acquire the lock after all retries
+          if (!acquiredLock) {
+            this.logger.warn(`Job: ${name}; Failed to acquire lock after ${maxRetries} attempts`);
+            return;
+          }
         }
 
         this.logger.log(startMessage);
@@ -821,7 +840,6 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
                 result = result.getFrames();
                 break;
               case isJSON(result):
-                result = result;
                 break;
               default:
                 result = JSON.stringify(result);
@@ -854,12 +872,12 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           if (acquiredLock) {
             // Release the lock only if we still own it
             const script = `
-                if redis.call("get", KEYS[1]) == ARGV[1] then
-                  return redis.call("del", KEYS[1])
-                else
-                  return 0
-                end
-              `;
+            if redis.call("get", KEYS[1]) == ARGV[1] then
+              return redis.call("del", KEYS[1])
+            else
+              return 0
+            end
+          `;
             await redis.eval(script, 1, lockKey, lockValue);
 
             endMessage = `Released lock for job: ${name}; Ended - ${status}`;
@@ -877,7 +895,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
 }
 
 export class Lens {
-  private frames: Frame[] = [];
+  private readonly frames: Frame[] = [];
 
   get isEmpty() {
     return this.frames.length === 0;

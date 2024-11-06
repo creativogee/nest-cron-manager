@@ -301,6 +301,9 @@ export interface EndJob {
 export interface JobContext {
   distributed?: boolean;
   ttl?: number;
+  batch?: number;
+  maxRetries?: number;
+  retryDelay?: number;
 }
 
 interface DatabaseOps {
