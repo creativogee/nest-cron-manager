@@ -53,12 +53,14 @@ export class CronManagerController {
     @Body() body: UpdateCronConfig,
     @Param('id') id: string,
   ) {
-    return this.cronManager.updateCronConfig({ ...body, id: +id });
+    const data = await this.cronManager.updateCronConfig({ ...body, id: +id });
+    return { data };
   }
 
   @Get('/cron/config')
   async listCronConfig() {
-    return this.cronManager.listCronConfig();
+    const data = await this.cronManager.listCronConfig();
+    return { data };
   }
 
   @Put('/cron/config/:id/toggle')

@@ -313,6 +313,11 @@ export interface JobContext {
   concurrent?: boolean;
   maxRetries?: number;
   retryDelay?: number;
+  /**
+   * A flag indicating whether the job should run only once.
+   * If set to `true`, the job will be turned off
+   */
+  runOnce?: boolean;
 }
 
 interface DatabaseOps {

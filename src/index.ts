@@ -764,7 +764,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     }
   }
 
-  private log = {
+  private readonly log = {
     error: (message: string) => this.logMessage('error', message),
     warn: (message: string) => this.logMessage('warn', message),
     info: (message: string) => this.logMessage('info', message),
@@ -927,6 +927,10 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           }
 
           status = 'Success';
+
+          if (context.runOnce) {
+            await this.updateCronConfig({ id: job?.config?.id, enabled: false });
+          }
         } catch (error) {
           lens.capture({ title: 'Error', message: error.message });
           result = lens.getFrames();
