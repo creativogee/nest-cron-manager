@@ -558,6 +558,11 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
         update.query = this.encryptQuery(update.query);
       }
 
+      if (update.context) {
+        const redis: Redis = this.redisService.getClient();
+        await redis.set(`context-${found.name}`, JSON.stringify(update.context));
+      }
+
       Object.assign(found, update);
 
       const cronConfig: CronConfig = await this.databaseOps.saveCronConfig(found);
@@ -838,21 +843,20 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
           throw new Error(`Job: ${name}; Failed to start`);
         }
 
-        // Pull dynamic context from Redis if it exists
         let context = staticContext;
-        const dynamicContext = await redis.get(`context-${name}`);
-        if (dynamicContext) {
-          context = JSON.parse(dynamicContext);
-        } else {
-          // Dump static context to Redis
-          await redis.set(`context-${name}`, JSON.stringify(staticContext));
-        }
-
         replicas = context.replicas;
 
         let startMessage = `Job: ${name}; Started - Success`;
 
         if (context?.distributed) {
+          const dynamicContext = await redis.get(`context-${name}`);
+
+          context = dynamicContext ? JSON.parse(dynamicContext) : staticContext;
+
+          if (!dynamicContext) {
+            await redis.set(`context-${name}`, JSON.stringify(staticContext));
+          }
+
           const ttl = context?.ttl || 30;
           const maxRetries = context?.maxRetries || 3;
           const retryDelay = context?.retryDelay || 3;
