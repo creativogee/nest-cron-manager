@@ -1,4 +1,4 @@
-import { OnModuleInit } from '@nestjs/common';
+import { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CronJob as Job } from 'cron';
 import crypto from 'crypto-js';
 import { Redis } from 'ioredis';
@@ -22,7 +22,7 @@ import { delay, intervalToCron, isJSON, validateDeps } from './helper';
 export const CMC_WATCH = 'cmc';
 const out_cmc = (cronConfig: CronConfig) => cronConfig.name !== CMC_WATCH;
 
-export class CronManager implements CronManagerInterface, OnModuleInit {
+export class CronManager implements CronManagerInterface, OnModuleInit, OnModuleDestroy {
   private readonly replicaId: string;
   private readonly logger: any;
   private readonly cronManagerControlRepository: any;
@@ -44,6 +44,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     info: 2,
     debug: 3,
   };
+  private readonly releaseLocksOnShutdown: boolean;
 
   static readonly JobType = {
     INLINE: 'inline',
@@ -64,6 +65,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     cronJobService,
     entityManager,
     cronManagerControlRepository,
+    releaseLocksOnShutdown = false,
   }: CronManagerDeps) {
     this.replicaId = replicaId;
     this.logger = logger;
@@ -77,6 +79,7 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
     this.enabled = enabled;
     this.watchTime = intervalToCron(watchTime, this.log);
     this.querySecret = querySecret;
+    this.releaseLocksOnShutdown = releaseLocksOnShutdown;
   }
 
   onModuleInit() {
@@ -970,6 +973,38 @@ export class CronManager implements CronManagerInterface, OnModuleInit {
       if (error?.message) {
         this.log.warn(error.message);
       }
+    }
+  }
+
+  async onModuleDestroy() {
+    try {
+      // Stop all scheduled jobs
+      this.cronJobs.forEach((job, name) => {
+        job.stop();
+        this.log.info(`Job: ${name} stopped`);
+      });
+      this.cronJobs.clear();
+
+      // Conditionally release Redis locks
+      if (this.releaseLocksOnShutdown) {
+        const redis: Redis = this.redisService.getClient();
+        const lockKeys = await redis.keys('cron-lock-*');
+        for (const lockKey of lockKeys) {
+          await redis.del(lockKey);
+          this.log.info(`Lock released: ${lockKey}`);
+        }
+      }
+
+      // Close Redis connection
+      const redis: Redis = this.redisService.getClient();
+      await redis.quit();
+      this.log.info('Redis connection closed');
+
+      this.log.info(
+        'All jobs stopped, locks released (if configured), and resources cleaned up successfully',
+      );
+    } catch (error) {
+      this.log.error(`Error during shutdown: ${error.message}`);
     }
   }
 }

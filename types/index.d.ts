@@ -262,6 +262,15 @@ export interface CronManagerDeps {
    * This field is optional.
    */
   querySecret?: string;
+
+  /**
+   * A flag indicating whether Redis locks should be released during shutdown.
+   * If set to `true`, all locks matching the pattern `cron-lock-*` will be deleted
+   * when the application shuts down. This is useful for preventing stale locks but
+   * may lead to race conditions in distributed environments.
+   * Defaults to `false`.
+   */
+  releaseLocksOnShutdown?: boolean;
 }
 
 export interface CreateCronManagerControl {
